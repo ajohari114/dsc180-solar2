@@ -7,7 +7,7 @@ port = 7687
 
 graph = Graph(f"bolt://{website}:{port}", auth=("neo4j", "magenta-traffic-powder-anatomy-basket-8461")) # magenta-etc is the passphrase
 
-def grab_sample(batch_id, sample_id, to_df = False):
+def grab_sample(batch_id, sample_id):
     g = graph.run(f"""MATCH (n:Chemical)
     WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
     WITH n.chemical_id AS chemical_id, collect(n) AS nodes
@@ -34,7 +34,7 @@ def grab_batch(batch_id):
     return g.to_ndarray()
 
 def node_cluster_size(batch_id, sample_id):
-    return len(grab_sample(batch_id, sample_id).to_data_frame())
+    return len(grab_sample(batch_id, sample_id))
     
 
 def get_sample_steps(batch_id, sample_id):
@@ -168,7 +168,7 @@ def create_row(sample):
     return new_row
 
 def tabularize_samples(samples):
-    rows = [create_row(grab_sample(*i, True)) for i in samples]
+    rows = [create_row(grab_sample(*i)) for i in samples]
     df = pd.DataFrame(rows)
     if 'antisolvent' in df:
         elem_df = df['antisolvent'].apply(extract_elem_dict).apply(pd.Series).fillna(0)
