@@ -9,6 +9,7 @@ from PIL.ExifTags import TAGS
 from collections import defaultdict
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 
 
 def rgb_to_cmyk(r, g, b):
@@ -285,6 +286,39 @@ def generate_csv(fp, b_id):
 
         new_csv = pd.concat([prev_df,df]).reset_index(drop = True)
     
-        new_csv.to_csv(f'{b_id}_cmet.csv')
+        new_csv.to_csv(f'{b_id}_cmet.csv', index = False)
     else:
-        df.to_csv(f'{b_id}_cmet.csv')
+        df.to_csv(f'{b_id}_cmet.csv', index = False)
+        
+def get_curve_params(x,y):
+    def logistic(x, L=1, x_0=0, k=1):
+        return L / (1 + np.exp(-k * (x - x_0)))
+
+    L_estimate = .6
+    x_0_estimate = 70
+    k_estimate = .1
+    p_0 = [L_estimate, x_0_estimate, k_estimate]
+    popt, _ = curve_fit(logistic, x, y, p_0, bounds = ([0.60, -np.inf, -np.inf],[0.601, np.inf, np.inf]))
+    return popt
+
+def create_cmet_node(batch_id, sample_id, cmet, curve_L, curve_x0, curve_k):
+    graph.run(f"""MATCH (n)
+                  WHERE n.action = 'colormetrics' and n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}'
+                  DELETE n""")
+    new_node = Node('Action', action = 'colormetrics', batch_id = batch_id, sample_id = sample_id, colotmetrics_hours = [i[0] for i in cmet], colormentrics_values = [i[1] for i in cmet], curve_L = curve_L, curve_x0= curve_x0, curve_k = curve_k)
+    
+    graph.create(new_node)
+    
+def add_cmet_data(fp, b_id):
+    cmet = pd.read_csv(fp)
+    
+    if 'Unamed' in cmet.columns[0]:
+        cmet = cmet.iloc[:,1:]
+
+    for i in cmet.columns[1:]:
+        curve_params = get_curve_params(cmet['Hour'], cmet[i])
+        curve_params = [float(i) for i in curve_params]
+
+        curr_cmet = cmet[['Hour', i]].values.tolist()
+        curr_cmet = [[float(j) for j in i] for i in curr_cmet]
+        create_cmet_node(batch, i, curr_cmet, *curve_params)
