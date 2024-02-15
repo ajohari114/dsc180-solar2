@@ -1,6 +1,7 @@
 from py2neo import Graph
 import pandas as pd
 import warnings
+from tqdm.auto import tqdm
 
 website = 'fenninggroupnas.ucsd.edu'
 port = 7687
@@ -28,7 +29,7 @@ def grab_chemicals(batch_id, sample_id):
 
 def grab_batch(batch_id):
     g = graph.run(f"""MATCH (n:Action)
-    WHERE (n.step_id = 1 and n.batch_id = '{batch_id}')
+    WHERE (n.step_id = '1' and n.batch_id = '{batch_id}')
     WITH n.sample_id AS sample_id, collect(n) AS nodes
     WITH nodes[0] AS unique_node
     RETURN unique_node.batch_id, unique_node.sample_id
@@ -139,6 +140,8 @@ def create_row(sample):
     row = {}
     solute_counter = 1
     solvent_counter = 1
+    row['batch_id'] = sample[0]['batch_id']
+    row['sample_id'] = sample[0]['sample_id']
     for i in sample:
         if 'chem_type' in i:
             if i['chem_type'] == 'solute':
@@ -168,7 +171,11 @@ def create_row(sample):
             if i['action'] == 'fitted_metrics':
                 for j in i:
                     if j not in ['action', 'batch_id', 'sample_id', 'step_id', 't_samplepresent_0']:
-                        row[j] = i[j]  
+                        row[j] = i[j]
+            if i['action'] == 'colormetrics':
+                row['curve_L'] = i['curve_L']
+                row['curve_x0'] = i['curve_x0']
+                row['curve_k'] = i['curve_k']
     return row
 def expand_df(df):
     for i in range(len(df.columns)):
@@ -185,7 +192,10 @@ def expand_df(df):
     return df
     
 def tabularize_samples(samples):
-    rows = [create_row(grab_sample(*i)) for i in samples]
+    rows = []
+    for i in tqdm(samples, desc = 'Tabularizing Samples'):
+        rows.append(create_row(grab_sample(*i)))
+
     df = pd.DataFrame(rows)
     for i in range(len(df.columns)):
         df = expand_df(df)
