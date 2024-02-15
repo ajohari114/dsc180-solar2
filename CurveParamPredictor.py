@@ -11,16 +11,17 @@ from sklearn.pipeline import Pipeline
 
 
 class CurveParamPredictor: 
-    def __init__(self, df, folds = 10):
+    def __init__(self, folds = 10):
+        self.folds = folds
+        self.all_models = {}
+        
+        
+    def train(self, df):
         self.X = df.iloc[:,2:-3]
         self.y_x0 = df['curve_x0']
         self.y_k = df['curve_k']
         self.cat_features = self.X.select_dtypes(include=['object','bool']).columns
         self.num_features = self.X.select_dtypes(exclude=['object','bool']).columns
-        self.folds = folds
-        
-        
-    def train(self):
         
         preprocessor = ColumnTransformer(
             transformers=[
@@ -128,6 +129,3 @@ class CurveParamPredictor:
                 self.best_model_k = grids
                 best_rmse = rmse
             print('-----')
-            
-test = CurveParamPredictor(pd.read_csv('dummy_data.csv'), folds = 5)
-test.train()
