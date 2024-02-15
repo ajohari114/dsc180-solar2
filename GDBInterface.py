@@ -17,11 +17,14 @@ def grab_sample(batch_id, sample_id):
     WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
     WITH n.step_id AS step_id, collect(n) AS nodes
     RETURN nodes[0] as unique_node""")
-    if to_df == False:
-        return g
-    else:
-        return g.to_data_frame()
-
+    return g.to_data_frame()
+    
+def grab_chemicals(batch_id, sample_id):
+    g = graph.run(f"""MATCH (n:Chemical)
+    WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
+    WITH n.chemical_id AS chemical_id, collect(n) AS nodes
+    RETURN nodes[0] as unique_node""")
+    return g.to_data_frame()
 
 def grab_batch(batch_id):
     g = graph.run(f"""MATCH (n:Action)
@@ -103,82 +106,90 @@ def segment_samples(rules):
         
     return nds
 
-def extract_elem_dict(s):
+def extract_dict(s):
+    idx_to_split = []
+    for i in range(len(s)):
+        if s[i] == '_' and str.isdigit(s[i-1]):
+            idx_to_split.append(i)
+    split_elem = []
+
+    idx_to_split.append(-1)
+    split_elem = []
+
+    for i in range(len(idx_to_split)):
+        if i == 0:
+            split_elem.append(s[0:idx_to_split[0]])
+        else:
+            split_elem.append(s[idx_to_split[i-1]+1:idx_to_split[i]])
+
     elem_dict = {}
-    
-    split_elem = s.split('_')
+
     for i in split_elem:
         num_idx = 0
         for j in range(len(i)):
             if str.isdigit(i[j]):
                 num_idx= j
                 break
-        if i[:num_idx] != '':
-            elem_dict[i[:num_idx]] = float(i[num_idx:])
-        else:
-            elem_dict['Unknown'] = float(i[num_idx:])
+        elem_dict[i[:num_idx]] = i[num_idx:]
 
     return elem_dict
 
 def create_row(sample):
-    new_row = {}
     sample = sample['unique_node']
-    new_row['batch_id'] = sample[0]['batch_id']
-    new_row['sample_id'] = sample[0]['sample_id']
-
+    row = {}
+    solute_counter = 1
+    solvent_counter = 1
     for i in sample:
         if 'chem_type' in i:
-            new_row[i['chem_type']] = i['content']
+            if i['chem_type'] == 'solute':
+                if 'concentration' in i:
+                    row[f"solute_{i['content']}"] = float(i['concentration'])
+                else:
+                    row[f"solute_{solute_counter}"] = i['content']
+                    solute_counter += 1
+                    
+            if i['chem_type'] == 'solvent':
+                elems = extract_dict(i['content'])
+                if '' in elems and len(elems['']) == len(i['content'])-1:
+                    row[f'solvent_{solvent_counter}'] = i['content']
+                else:
+                    row[f'solvent_{solvent_counter}_elem_dict'] = elems
+                solvent_counter += 1
 
-            if 'volume' in i:
-                new_row[f"{i['chem_type']}_volume"] = i['volume']
-
-            if 'molarity' in i:
-                new_row[f"{i['chem_type']}_molarity"] = i['molarity']
+            if i['chem_type'] == 'solution':
+                row[f"solution_{i['content']}_molarity"] = float(i['molarity'])
+                row[f"solution_{i['content']}_volume"] = float(i['volume']) 
 
         if 'action' in i:
-            if i['action'] == 'drop':
-                new_row['drop_air_gap'] = bool(i['drop_air_gap'])
-                new_row['drop_blow_out'] = bool(i['drop_blow_out'])
-                new_row['drop_height'] = i['drop_height']
-                new_row['drop_rate'] = i['drop_rate']
-                new_row['drop_reuse_tip'] = bool(i['drop_reuse_tip'])
-                new_row['drop_slow_retract'] = bool(i['drop_slow_retract'])
-                new_row['drop_slow_travel'] = bool(i['drop_slow_travel'])
-
-            if i['action'] == 'spin':
-                new_row['spin_acceleration'] = i['spin_acceleration']
-                new_row['spin_rpm'] = i['spin_rpm']
-                new_row['spin_duration'] = i['spin_duration']
-
             if i['action'] == 'anneal':
-                new_row['anneal_duration'] = i['anneal_duration']
-                new_row['anneal_temperature'] = i['anneal_temperature']
-
-            if i['action'] == 'rest':
-                new_row['rest_duration'] = i['rest_duration']
+                row['anneal_duration'] = i['anneal_duration']
+                row['anneal_temperature'] = i['anneal_temperature']
 
             if i['action'] == 'fitted_metrics':
-                new_row['bf_inhomogeneity_0'] = i['bf_inhomogeneity_0']
-                if "df_median_0" in i:
-                    new_row['df_median_0'] = i['df_median_0']
-                new_row['pl_fwhm_0'] = i['pl_fwhm_0']
-                new_row['pl_intensity_0'] = i['pl_intensity_0']
-                new_row['pl_peakev_0'] = i['pl_peakev_0']    
-    return new_row
-
+                for j in i:
+                    if j not in ['action', 'batch_id', 'sample_id', 'step_id', 't_samplepresent_0']:
+                        row[j] = i[j]  
+    return row
+def expand_df(df):
+    for i in range(len(df.columns)):
+        if 'elem_dict' in df.columns[i]:
+            elem_df = df[df.columns[i]].apply(pd.Series).fillna(0)
+            elem_df.columns = [f"{df.columns[i][:-10]}_{j}" for j in elem_df.columns]
+            num_elems = len(elem_df.columns)
+            df = pd.concat([df,elem_df], axis = 1)
+            col_index = df.columns.to_list().index(df.columns[i])
+            df = df.drop(df.columns[i], axis = 1)
+            col_list = df.columns.to_list()
+            new_col_order = col_list[:col_index] + col_list[-num_elems:] + col_list[col_index:-num_elems]
+            df = df.loc[:,new_col_order]
+    return df
+    
 def tabularize_samples(samples):
     rows = [create_row(grab_sample(*i)) for i in samples]
     df = pd.DataFrame(rows)
-    if 'antisolvent' in df:
-        elem_df = df['antisolvent'].apply(extract_elem_dict).apply(pd.Series).fillna(0)
-        elem_df.columns = [f"anti_solvent_{i}" for i in elem_df.columns]
-        num_elems = len(elem_df.columns)
-        df = pd.concat([df,elem_df], axis = 1)
-        col_index = df.columns.to_list().index('antisolvent')
-        df = df.drop('antisolvent', axis = 1)
-        col_list = df.columns.to_list()
-        new_col_order = col_list[:col_index] + col_list[-num_elems:] + col_list[col_index:-num_elems]
-        df = df.loc[:,new_col_order]
-        
+    for i in range(len(df.columns)):
+        df = expand_df(df)
+    for i in range(len(df.columns)):
+        if 'solute_' in df.columns[i] and not str.isdigit(df.columns[i][-1]):
+            df[df.columns[i]] = df[df.columns[i]].fillna(0)
     return df
