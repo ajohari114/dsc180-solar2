@@ -312,7 +312,7 @@ def create_cmet_node(batch_id, sample_id, cmet, curve_L, curve_x0, curve_k):
 def add_cmet_data(fp, b_id):
     cmet = pd.read_csv(fp)
     
-    if 'Unamed' in cmet.columns[0]:
+    if 'Unnamed' in cmet.columns[0]:
         cmet = cmet.iloc[:,1:]
 
     for i in cmet.columns[1:]:
@@ -321,4 +321,4 @@ def add_cmet_data(fp, b_id):
 
         curr_cmet = cmet[['Hour', i]].values.tolist()
         curr_cmet = [[float(j) for j in i] for i in curr_cmet]
-        create_cmet_node(batch, i, curr_cmet, *curve_params)
+        create_cmet_node(b_id, i, curr_cmet, *curve_params)
