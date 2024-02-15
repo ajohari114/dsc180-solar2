@@ -14,12 +14,22 @@ class CurveParamPredictor:
     def __init__(self, folds = 10):
         self.folds = folds
         self.all_models = {}
+    
+    def predict(self, df):
         
+        if 'curve_L' in df.columns:
+            X = df.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
+        else:
+            X = df.drop(['batch_id','sample_id'], axis = 1)
+        
+        return [.60, self.best_model_x0.predict(X), self.best_model_k.predict(X)]
+            
         
     def train(self, df):
-        self.X = df.iloc[:,2:-3]
         self.y_x0 = df['curve_x0']
         self.y_k = df['curve_k']
+        self.X = df.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
+
         self.cat_features = self.X.select_dtypes(include=['object','bool']).columns
         self.num_features = self.X.select_dtypes(exclude=['object','bool']).columns
         
