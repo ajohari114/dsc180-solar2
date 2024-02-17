@@ -135,7 +135,7 @@ def extract_dict(s):
 
     return elem_dict
 
-def create_row(sample):
+def create_row(sample, include_fitted_metrics = True, fitted_metrics_only = False):
     sample = sample['unique_node']
     row = {}
     solute_counter = 1
@@ -144,14 +144,14 @@ def create_row(sample):
     row['sample_id'] = sample[0]['sample_id']
     for i in sample:
         if 'chem_type' in i:
-            if i['chem_type'] == 'solute':
+            if i['chem_type'] == 'solute' and not fitted_metrics_only:
                 if 'concentration' in i:
                     row[f"solute_{i['content']}"] = float(i['concentration'])
                 else:
                     row[f"solute_{solute_counter}"] = i['content']
                     solute_counter += 1
                     
-            if i['chem_type'] == 'solvent':
+            if i['chem_type'] == 'solvent' and not fitted_metrics_only:
                 elems = extract_dict(i['content'])
                 if '' in elems and len(elems['']) == len(i['content'])-1:
                     row[f'solvent_{solvent_counter}'] = i['content']
@@ -159,16 +159,16 @@ def create_row(sample):
                     row[f'solvent_{solvent_counter}_elem_dict'] = elems
                 solvent_counter += 1
 
-            if i['chem_type'] == 'solution':
+            if i['chem_type'] == 'solution' and not fitted_metrics_only:
                 row[f"solution_{i['content']}_molarity"] = float(i['molarity'])
                 row[f"solution_{i['content']}_volume"] = float(i['volume']) 
 
         if 'action' in i:
-            if i['action'] == 'anneal':
+            if i['action'] == 'anneal' and not fitted_metrics_only:
                 row['anneal_duration'] = i['anneal_duration']
                 row['anneal_temperature'] = i['anneal_temperature']
 
-            if i['action'] == 'fitted_metrics':
+            if i['action'] == 'fitted_metrics' and include_fitted_metrics:
                 for j in i:
                     if j not in ['action', 'batch_id', 'sample_id', 'step_id', 't_samplepresent_0']:
                         row[j] = i[j]
@@ -191,10 +191,10 @@ def expand_df(df):
             df = df.loc[:,new_col_order]
     return df
     
-def tabularize_samples(samples):
+def tabularize_samples(samples, include_fitted_metrics = True, fitted_metrics_only = False):
     rows = []
     for i in tqdm(samples, desc = 'Tabularizing Samples'):
-        rows.append(create_row(grab_sample(*i)))
+        rows.append(create_row(grab_sample(*i),include_fitted_metrics, fitted_metrics_only))
 
     df = pd.DataFrame(rows)
     for i in range(len(df.columns)):
