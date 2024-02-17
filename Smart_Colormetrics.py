@@ -10,6 +10,12 @@ from collections import defaultdict
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+from py2neo import Graph, Node
+
+website = 'fenninggroupnas.ucsd.edu'
+port = 7687
+
+graph = Graph(f"bolt://{website}:{port}", auth=("neo4j", "magenta-traffic-powder-anatomy-basket-8461")) # magenta-etc is the passphrase
 
 
 def rgb_to_cmyk(r, g, b):
@@ -294,18 +300,18 @@ def get_curve_params(x,y):
     def logistic(x, L=1, x_0=0, k=1):
         return L / (1 + np.exp(-k * (x - x_0)))
 
-    L_estimate = .6
-    x_0_estimate = 70
-    k_estimate = .1
+    L_estimate = 1
+    x_0_estimate = 100
+    k_estimate = .03
     p_0 = [L_estimate, x_0_estimate, k_estimate]
-    popt, _ = curve_fit(logistic, x, y, p_0, bounds = ([0.60, -np.inf, -np.inf],[0.601, np.inf, np.inf]))
+    popt, _ = curve_fit(logistic, x, y, p_0, bounds = ([.99, -np.inf, -np.inf],[1.0, np.inf, np.inf]))
     return popt
 
 def create_cmet_node(batch_id, sample_id, cmet, curve_L, curve_x0, curve_k):
     graph.run(f"""MATCH (n)
                   WHERE n.action = 'colormetrics' and n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}'
                   DELETE n""")
-    new_node = Node('Action', action = 'colormetrics', batch_id = batch_id, sample_id = sample_id, colotmetrics_hours = [i[0] for i in cmet], colormentrics_values = [i[1] for i in cmet], curve_L = curve_L, curve_x0= curve_x0, curve_k = curve_k)
+    new_node = Node('Action', action = 'colormetrics', batch_id = batch_id, sample_id = sample_id, colormetrics_hours = [i[0] for i in cmet], normalized_colormetrics = [i[1] for i in cmet], curve_L = curve_L, curve_x0= curve_x0, curve_k = curve_k)
     
     graph.create(new_node)
     
@@ -316,6 +322,9 @@ def add_cmet_data(fp, b_id):
         cmet = cmet.iloc[:,1:]
 
     for i in cmet.columns[1:]:
+        if i == 'Hour':
+            continue
+        cmet[i] = (cmet[i] - np.min(cmet[i]))/(.60-np.min(cmet[i]))
         curve_params = get_curve_params(cmet['Hour'], cmet[i])
         curve_params = [float(i) for i in curve_params]
 
