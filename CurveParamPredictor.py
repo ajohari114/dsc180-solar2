@@ -11,6 +11,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from collections import defaultdict
 from tqdm.auto import tqdm
+import matplotlib.pyplot
+import warnings 
+warnings.filterwarnings('ignore')
 
 
 class CurveParamPredictor: 
@@ -20,13 +23,18 @@ class CurveParamPredictor:
         self.all_k_models = {}
 
     
-    def predict(sample):
+    def predict(self, sample):
         if 'curve_L' in sample.columns:
-            pred_X = sample.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
+            sample = sample.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
         else:
-            pred_X = sample.drop(['batch_id','sample_id'], axis = 1)
+            sample = sample.drop(['batch_id','sample_id'], axis = 1)
+            
+        if len(self.cat_features) > 0:
+            sample[self.cat_features] = self.cat_imp.transform(sample[self.cat_features])
+            
+        sample[self.num_features] = self.num_imp.transform(sample[self.num_features])
         
-        return [.60, self.best_model_x0.predict(pred_X), self.best_model_k.predict(pred_X)]
+        return [.60, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
     
     def train(self, df):
         self.samples_to_predict = df[df['curve_L'].isnull()]
@@ -65,22 +73,22 @@ class CurveParamPredictor:
             'Ridge Regression': Ridge(),
             'Lasso Regression': Lasso(max_iter=10000),
             'ElasticNet': ElasticNet(max_iter=10000),
-            'Random Forest Regressor': RandomForestRegressor(),
+            #'Random Forest Regressor': RandomForestRegressor(),
             'SVR': SVR(),
         }
         
         hyperparameters = {}
 
         hyperparameters['Ridge Regression'] = {
-            'Regressor__alpha' : [5, 2, 1, 0.1]
+            'Regressor__alpha' : [2, 1, 0.5, 0.1]
         }
 
         hyperparameters['Lasso Regression'] = {
-            'Regressor__alpha' : [5, 2, 1, 0.1]
+            'Regressor__alpha' : [2, 1, 0.5, 0.1]
         }
 
         hyperparameters['ElasticNet'] = {
-            'Regressor__alpha' : [5, 2, 1, 0.1],
+            'Regressor__alpha' : [2, 1, 0.5, 0.1],
             'Regressor__l1_ratio' : [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             'Regressor__max_iter' : [10000]
 
@@ -97,7 +105,7 @@ class CurveParamPredictor:
         hyperparameters['SVR'] = {
             'Regressor__kernel' : ['linear', 'rbf', 'sigmoid'],
             'Regressor__degree' : [2,3,4],
-            'Regressor__C' : [0.1,0.2,0.5,1,2],
+            'Regressor__C' : [2, 1, 0.5, 0.1],
         }
         
         s = 0
@@ -167,21 +175,21 @@ class CurveParamPredictor:
                 best_rmse = rmse
             #print('-----')
             
-    def performance_analysis(self, df):
+    def sample_performance_analysis(self, df):
         n = len(df)
         
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
 
         
-        for i in range(13, n, 10):
+        for i in [len(df)]:
             print(F'-----Analyzing models performance on {i} samples-----')
             self.stats_dict_k['n'].append(i)
             self.stats_dict_x0['n'].append(i)
             temp_stats_dict_k = defaultdict(lambda: [])
             temp_stats_dict_x0 = defaultdict(lambda: [])
 
-            for _ in tqdm(range(10), desc = f'Running trials for {i} samples.'):
+            for _ in tqdm(range(5), desc = f'Running trials for {i} samples.'):
                 temp_df = df.sample(i)
 
                 self.train(temp_df)
@@ -193,7 +201,90 @@ class CurveParamPredictor:
                     temp_stats_dict_x0[k].append(self.all_x0_models[k])
                     
             for k in self.all_k_models:
-                self.stats_dict_k[k].append(np.mean(temp_stats_dict_k[k]))
+                self.stats_dict_k[k].append(temp_stats_dict_k[k])
 
             for k in self.all_x0_models:
-                self.stats_dict_x0[k].append(np.mean(temp_stats_dict_x0[k]))
+                print(k)
+                self.stats_dict_x0[k].append(temp_stats_dict_x0[k])
+                
+    def model_variance_analysis(self,df, samplings = 100):
+        self.stats_dict_x0 = defaultdict(lambda :[])
+        self.stats_dict_k = defaultdict(lambda :[])
+        
+        for i in [len(df)]:
+            print(F'-----Analyzing models variance on {i} samples-----')
+            self.stats_dict_k['n'].append(i)
+            self.stats_dict_x0['n'].append(i)
+            temp_stats_dict_k = defaultdict(lambda: [])
+            temp_stats_dict_x0 = defaultdict(lambda: [])
+
+            for _ in tqdm(range(samplings), desc = f'Running trials for {i} samples.'):
+                temp_df = df.sample(i)
+
+                self.train(temp_df)
+
+                for k in self.all_k_models:
+                    temp_stats_dict_k[k].append(self.all_k_models[k])
+
+                for k in self.all_x0_models:
+                    temp_stats_dict_x0[k].append(self.all_x0_models[k])
+                    
+            for k in self.all_k_models:
+                self.stats_dict_k[k].append(temp_stats_dict_k[k])
+
+            for k in self.all_x0_models:
+                self.stats_dict_x0[k].append(temp_stats_dict_x0[k])
+                
+        for i in range(len(self.stats_dict_k['n'])):
+            for j in self.stats_dict_k:
+                if j == 'n':
+                    continue
+                plt.hist(self.stats_dict_k[j][i], bins  = 20)
+                plt.axvline(np.mean(self.stats_dict_k[j][i]), c = 'red', label = 'Average')
+                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {samplings})')
+                plt.ylabel('Frequency')
+                plt.xlabel('RMSE on Test Set')
+                plt.show()
+                
+                
+        for i in range(len(self.stats_dict_x0['n'])):
+            for j in self.stats_dict_x0:
+                if j == 'n':
+                    continue
+                plt.hist(self.stats_dict_x0[j][i], bins  = 20)
+                plt.axvline(np.mean(self.stats_dict_x0[j][i]), c = 'red', label = 'Average')
+                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {samplings})')
+                plt.ylabel('Frequency')
+                plt.xlabel('RMSE on Test Set')
+                plt.show()
+                
+    def generate_parity_plots(self):
+        observed_x0 = []
+        observed_k = []
+
+        predicted_x0 = []
+        predicted_k = []
+
+        j = 0
+        for i in test_data['sample_id']:
+            pred = self.predict(test[real_vals['sample_id'] == i])[1:]
+            obs = [self.y_x0, self.y_k]
+            predicted_x0.append(pred[0])
+            predicted_k.append(pred[1])
+
+            observed_x0.append(obs[0][j])
+            observed_k.append(obs[1][j])
+            j += 1
+            
+        plt.scatter(observed_x0, predicted_x0)
+        plt.plot(observed_x0, observed_x0, c = 'red')
+        plt.title('x0 Parity plot')
+        plt.ylabel('Predicted x0')
+        plt.xlabel('Real x0')
+        plt.show()
+        
+        plt.scatter(observed_k, predicted_k)
+        plt.plot(observed_k, observed_k, c = 'red')
+        plt.title('k Parity plot')
+        plt.ylabel('Predicted k')
+        plt.xlabel('Real k')
