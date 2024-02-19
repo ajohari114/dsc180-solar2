@@ -10,6 +10,8 @@ from sklearn.metrics import mean_squared_error
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from collections import defaultdict
+import catboost as cb
+from catboost import Pool
 from tqdm.auto import tqdm
 import matplotlib.pyplot
 import warnings 
@@ -73,22 +75,23 @@ class CurveParamPredictor:
             'Ridge Regression': Ridge(),
             'Lasso Regression': Lasso(max_iter=10000),
             'ElasticNet': ElasticNet(max_iter=10000),
-            #'Random Forest Regressor': RandomForestRegressor(),
+            'Random Forest Regressor': RandomForestRegressor(),
             'SVR': SVR(),
+            'CatBoost' : cb.CatBoost()
         }
         
         hyperparameters = {}
 
         hyperparameters['Ridge Regression'] = {
-            'Regressor__alpha' : [2, 1, 0.5, 0.1]
+            'Regressor__alpha' : [1, 0.5, 0.1]
         }
 
         hyperparameters['Lasso Regression'] = {
-            'Regressor__alpha' : [2, 1, 0.5, 0.1]
+            'Regressor__alpha' : [1, 0.5, 0.1]
         }
 
         hyperparameters['ElasticNet'] = {
-            'Regressor__alpha' : [2, 1, 0.5, 0.1],
+            'Regressor__alpha' : [1, 0.5, 0.1],
             'Regressor__l1_ratio' : [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             'Regressor__max_iter' : [10000]
 
@@ -105,8 +108,10 @@ class CurveParamPredictor:
         hyperparameters['SVR'] = {
             'Regressor__kernel' : ['linear', 'rbf', 'sigmoid'],
             'Regressor__degree' : [2,3,4],
-            'Regressor__C' : [2, 1, 0.5, 0.1],
+            'Regressor__C' : [1, 0.5, 0.1],
         }
+        
+        hyperparameters['CatBoost'] = {}
         
         s = 0
         for i in hyperparameters:
@@ -119,7 +124,7 @@ class CurveParamPredictor:
         
         best_rmse = np.inf
         
-        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y_x0, test_size=0.2)
+        self.X_train_x0, self.X_test_x0, self.y_train_x0, self.y_test_x0 = train_test_split(self.X, self.y_x0, test_size=0.2)
 
         for name, regressor in regressors.items():
             #print(f'Training {name} x0 models')
@@ -130,13 +135,17 @@ class CurveParamPredictor:
 
 
             grids = GridSearchCV(model,scoring= "neg_root_mean_squared_error", param_grid = hyperparameters[name], verbose = 0, cv = self.folds)
-            grids.fit(X_train, y_train)
-
+            
+            if name == 'CatBoost':
+                grids.fit(self.X_train_x0, self.y_train_x0, Regressor__verbose = 0)
+            else:
+                grids.fit(self.X_train_x0, self.y_train_x0)
+                
             # Make predictions on the test set
-            y_pred = grids.predict(X_test)
+            y_pred = grids.predict(self.X_test_x0)
 
             # Evaluate the model
-            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            rmse = np.sqrt(mean_squared_error(self.y_test_x0, y_pred))
             #print(f"{name} - RMSE on the test set: {rmse}")
             
             self.all_x0_models[name] = rmse
@@ -146,7 +155,7 @@ class CurveParamPredictor:
                 best_rmse = rmse
             #print('-----')
         
-        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y_k, test_size=0.2)
+        self.X_train_k, self.X_test_k, self.y_train_k, self.y_test_k = train_test_split(self.X, self.y_k, test_size=0.2)
 
             
         for name, regressor in regressors.items():
@@ -158,13 +167,18 @@ class CurveParamPredictor:
 
 
             grids = GridSearchCV(model,scoring= "neg_root_mean_squared_error", param_grid = hyperparameters[name], verbose = 0, cv = self.folds)
-            grids.fit(X_train, y_train)
+            
+            if name == 'CatBoost':
+                grids.fit(self.X_train_k, self.y_train_k, Regressor__verbose = 0)
+            else:
+                grids.fit(self.X_train_k, self.y_train_k)
+
 
             # Make predictions on the test set
-            y_pred = grids.predict(X_test)
+            y_pred = grids.predict(self.X_test_k)
 
             # Evaluate the model
-            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            rmse = np.sqrt(mean_squared_error(self.y_test_k, y_pred))
             #print(f"{name} - RMSE on the test set: {rmse}")
             
             self.all_k_models[name] = rmse
@@ -182,14 +196,14 @@ class CurveParamPredictor:
         self.stats_dict_k = defaultdict(lambda :[])
 
         
-        for i in [len(df)]:
+        for i in range(15, len(cpp.X), 5)::
             print(F'-----Analyzing models performance on {i} samples-----')
             self.stats_dict_k['n'].append(i)
             self.stats_dict_x0['n'].append(i)
             temp_stats_dict_k = defaultdict(lambda: [])
             temp_stats_dict_x0 = defaultdict(lambda: [])
 
-            for _ in tqdm(range(5), desc = f'Running trials for {i} samples.'):
+            for _ in tqdm(range(10), desc = f'Running trials for {i} samples.'):
                 temp_df = df.sample(i)
 
                 self.train(temp_df)
@@ -262,29 +276,21 @@ class CurveParamPredictor:
         observed_x0 = []
         observed_k = []
 
-        predicted_x0 = []
-        predicted_k = []
+        predicted_x0 = self.best_model_x0.predict(self.X_test_x0)
+        predicted_k = self.best_model_k.predict(self.X_test_k)
 
-        j = 0
-        for i in test_data['sample_id']:
-            pred = self.predict(test[real_vals['sample_id'] == i])[1:]
-            obs = [self.y_x0, self.y_k]
-            predicted_x0.append(pred[0])
-            predicted_k.append(pred[1])
+        obs = [self.y_test_x0, self.y_test_k]
 
-            observed_x0.append(obs[0][j])
-            observed_k.append(obs[1][j])
-            j += 1
             
-        plt.scatter(observed_x0, predicted_x0)
-        plt.plot(observed_x0, observed_x0, c = 'red')
+        plt.scatter(obs[0], predicted_x0)
+        plt.plot(obs[0], obs[0], c = 'red')
         plt.title('x0 Parity plot')
         plt.ylabel('Predicted x0')
         plt.xlabel('Real x0')
         plt.show()
         
-        plt.scatter(observed_k, predicted_k)
-        plt.plot(observed_k, observed_k, c = 'red')
+        plt.scatter(obs[1], predicted_k)
+        plt.plot(obs[1], obs[1], c = 'red')
         plt.title('k Parity plot')
         plt.ylabel('Predicted k')
         plt.xlabel('Real k')
