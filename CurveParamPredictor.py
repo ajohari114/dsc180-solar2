@@ -196,7 +196,7 @@ class CurveParamPredictor:
         self.stats_dict_k = defaultdict(lambda :[])
 
         
-        for i in range(15, len(cpp.X), 5)::
+        for i in range(15, len(cpp.X), 5):
             print(F'-----Analyzing models performance on {i} samples-----')
             self.stats_dict_k['n'].append(i)
             self.stats_dict_x0['n'].append(i)
