@@ -253,21 +253,46 @@ class CurveParamPredictor:
             for j in self.stats_dict_k:
                 if j == 'n':
                     continue
-                plt.hist(self.stats_dict_k[j][i], bins  = 20)
-                plt.axvline(np.mean(self.stats_dict_k[j][i]), c = 'red', label = 'Average')
-                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {samplings})')
+
+                temp = np.array(cpp.stats_dict_k[j][i])
+                temp_mean = np.mean(temp)
+                temp_std = np.std(temp)
+
+                print(f'{j} stats (before deleting outliers):')
+                print(f'RMSE average: {temp_mean}')
+                print(f'RMSE std: {temp_std}')
+
+
+                temp = temp[temp <= temp_mean + 3*temp_std]
+                temp = temp[temp >= temp_mean - 3*temp_std]
+
+                plt.hist(temp, bins  = 30)
+                plt.axvline(np.mean(temp), c = 'red', label = 'Average')
+                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {len(temp)})')
                 plt.ylabel('Frequency')
                 plt.xlabel('RMSE on Test Set')
                 plt.show()
-                
-                
+
+
         for i in range(len(self.stats_dict_x0['n'])):
             for j in self.stats_dict_x0:
                 if j == 'n':
                     continue
-                plt.hist(self.stats_dict_x0[j][i], bins  = 20)
-                plt.axvline(np.mean(self.stats_dict_x0[j][i]), c = 'red', label = 'Average')
-                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {samplings})')
+
+                temp = np.array(self.stats_dict_x0[j][i])
+                temp_mean = np.mean(temp)
+                temp_std = np.std(temp)
+
+                print(f'{j} stats (before deleting outliers):')
+                print(f'RMSE average: {temp_mean}')
+                print(f'RMSE std: {temp_std}')
+
+                temp = temp[temp <= temp_mean + 3*temp_std]
+                temp = temp[temp >= temp_mean - 3*temp_std]
+
+                plt.hist(temp, bins  = 20)
+                plt.axvline(np.mean(temp), c = 'red', label = 'Average')
+                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {len(temp)})')
                 plt.ylabel('Frequency')
                 plt.xlabel('RMSE on Test Set')
                 plt.show()
