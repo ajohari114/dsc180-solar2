@@ -13,7 +13,7 @@ from collections import defaultdict
 import catboost as cb
 from catboost import Pool
 from tqdm.auto import tqdm
-import matplotlib.pyplot as plt
+import matplotlib.pyplot
 import warnings 
 warnings.filterwarnings('ignore')
 
@@ -44,8 +44,7 @@ class CurveParamPredictor:
         
         df = df[~df['curve_L'].isnull()]
         
-        self.y_x0 = df['curve_x0']
-        self.y_k = df['curve_k']
+        self.y = df[['curve_x0','curve_k']]
         self.X = df.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
 
         self.cat_features = self.X.select_dtypes(include=['object','bool']).columns
@@ -67,7 +66,8 @@ class CurveParamPredictor:
         
         preprocessor = ColumnTransformer(
             transformers=[
-                ('OHE', OneHotEncoder(handle_unknown = 'ignore'), self.cat_features),
+                ('OHE', OneHotEncoder(handle_unknown = 'ignore', sparse = False
+                                     ), self.cat_features),
                 ('Scalar', StandardScaler(), self.num_features)
             ],
         )
@@ -124,7 +124,7 @@ class CurveParamPredictor:
         
         best_rmse = np.inf
         
-        self.X_train_x0, self.X_test_x0, self.y_train_x0, self.y_test_x0 = train_test_split(self.X, self.y_x0, test_size=0.2)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=0.2)
 
         for name, regressor in regressors.items():
             #print(f'Training {name} x0 models')
@@ -137,15 +137,15 @@ class CurveParamPredictor:
             grids = GridSearchCV(model,scoring= "neg_root_mean_squared_error", param_grid = hyperparameters[name], verbose = 0, cv = self.folds)
             
             if name == 'CatBoost':
-                grids.fit(self.X_train_x0, self.y_train_x0, Regressor__verbose = 0)
+                grids.fit(self.X_train, self.y_train['curve_x0'], Regressor__verbose = 0)
             else:
-                grids.fit(self.X_train_x0, self.y_train_x0)
+                grids.fit(self.X_train, self.y_train['curve_x0'])
                 
             # Make predictions on the test set
-            y_pred = grids.predict(self.X_test_x0)
+            y_pred = grids.predict(self.X_test)
 
             # Evaluate the model
-            rmse = np.sqrt(mean_squared_error(self.y_test_x0, y_pred))
+            rmse = np.sqrt(mean_squared_error(self.y_test['curve_x0'], y_pred))
             #print(f"{name} - RMSE on the test set: {rmse}")
             
             self.all_x0_models[name] = rmse
@@ -155,8 +155,6 @@ class CurveParamPredictor:
                 best_rmse = rmse
             #print('-----')
         
-        self.X_train_k, self.X_test_k, self.y_train_k, self.y_test_k = train_test_split(self.X, self.y_k, test_size=0.2)
-
             
         for name, regressor in regressors.items():
             #print(f'Training {name} k models')
@@ -169,16 +167,16 @@ class CurveParamPredictor:
             grids = GridSearchCV(model,scoring= "neg_root_mean_squared_error", param_grid = hyperparameters[name], verbose = 0, cv = self.folds)
             
             if name == 'CatBoost':
-                grids.fit(self.X_train_k, self.y_train_k, Regressor__verbose = 0)
+                grids.fit(self.X_train, self.y_train['curve_k'], Regressor__verbose = 0)
             else:
-                grids.fit(self.X_train_k, self.y_train_k)
+                grids.fit(self.X_train, self.y_train['curve_k'])
 
 
             # Make predictions on the test set
-            y_pred = grids.predict(self.X_test_k)
+            y_pred = grids.predict(self.X_test)
 
             # Evaluate the model
-            rmse = np.sqrt(mean_squared_error(self.y_test_k, y_pred))
+            rmse = np.sqrt(mean_squared_error(self.y_test['curve_k'], y_pred))
             #print(f"{name} - RMSE on the test set: {rmse}")
             
             self.all_k_models[name] = rmse
@@ -261,6 +259,8 @@ class CurveParamPredictor:
                 print(f'{j} stats (before deleting outliers):')
                 print(f'RMSE average: {temp_mean}')
                 print(f'RMSE std: {temp_std}')
+                print(f'RMSE max: {np.max(temp)}')
+                print(f'RMSE min: {np.min(temp)}')
 
 
                 temp = temp[temp <= temp_mean + 3*temp_std]
@@ -286,6 +286,8 @@ class CurveParamPredictor:
                 print(f'{j} stats (before deleting outliers):')
                 print(f'RMSE average: {temp_mean}')
                 print(f'RMSE std: {temp_std}')
+                print(f'RMSE max: {np.max(temp)}')
+                print(f'RMSE min: {np.min(temp)}')
 
                 temp = temp[temp <= temp_mean + 3*temp_std]
                 temp = temp[temp >= temp_mean - 3*temp_std]
@@ -301,10 +303,10 @@ class CurveParamPredictor:
         observed_x0 = []
         observed_k = []
 
-        predicted_x0 = self.best_model_x0.predict(self.X_test_x0)
-        predicted_k = self.best_model_k.predict(self.X_test_k)
+        predicted_x0 = self.best_model_x0.predict(self.X_test)
+        predicted_k = self.best_model_k.predict(self.X_test)
 
-        obs = [self.y_test_x0, self.y_test_k]
+        obs = [self.y_test['curve_x0'], self.y_test['curve_k']]
 
             
         plt.scatter(obs[0], predicted_x0)
