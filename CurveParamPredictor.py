@@ -13,7 +13,7 @@ from collections import defaultdict
 import catboost as cb
 from catboost import Pool
 from tqdm.auto import tqdm
-import matplotlib.pyplot
+import matplotlib.pyplot as plt
 import warnings 
 warnings.filterwarnings('ignore')
 
