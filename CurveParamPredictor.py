@@ -28,7 +28,7 @@ class CurveParamPredictor:
     def predict(self, sample):
         if 'curve_L' in sample.columns:
             sample = sample.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
-        else:
+        elif 'sample_id' in sample.columns:
             sample = sample.drop(['batch_id','sample_id'], axis = 1)
             
         if len(self.cat_features) > 0:
@@ -36,7 +36,14 @@ class CurveParamPredictor:
             
         sample[self.num_features] = self.num_imp.transform(sample[self.num_features])
         
-        return [.60, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
+        if len(sample) == 1:
+            return [1, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
+        else:
+            tr = []
+            for i, r in sample.iterrows():    
+                tr.append([1, self.best_model_x0.predict(pd.DataFrame(r).T)[0],self.best_model_k.predict(pd.DataFrame(r).T)[0]])
+            return tr
+                
     
     def train(self, df):
         self.samples_to_predict = df[df['curve_L'].isnull()]
@@ -45,9 +52,9 @@ class CurveParamPredictor:
         df = df[~df['curve_L'].isnull()]
         
         self.y = df[['curve_x0','curve_k']]
-        self.X = df.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
+        self.X = df.drop(['curve_L','curve_k','curve_x0'], axis = 1)
 
-        self.cat_features = self.X.select_dtypes(include=['object','bool']).columns
+        self.cat_features = self.X.select_dtypes(include=['object','bool']).drop(['batch_id','sample_id'], axis = 1).columns
         self.num_features = self.X.select_dtypes(exclude=['object','bool']).columns
         
         self.cat_imp = SimpleImputer(missing_values= np.nan, strategy= 'most_frequent')
@@ -125,6 +132,13 @@ class CurveParamPredictor:
         best_rmse = np.inf
         
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=0.2)
+        
+        self.train_samples = self.X_train[['batch_id','sample_id']]
+        self.test_samples = self.X_test[['batch_id','sample_id']]
+        
+        self.X_train = self.X_train.drop(['batch_id','sample_id'], axis = 1)
+        self.X_test = self.X_test.drop(['batch_id','sample_id'], axis = 1)
+
 
         for name, regressor in regressors.items():
             #print(f'Training {name} x0 models')
@@ -132,7 +146,6 @@ class CurveParamPredictor:
                 ('preprocessor', preprocessor),
                 ('Regressor', regressor)
             ])
-
 
             grids = GridSearchCV(model,scoring= "neg_root_mean_squared_error", param_grid = hyperparameters[name], verbose = 0, cv = self.folds)
             
@@ -321,3 +334,29 @@ class CurveParamPredictor:
         plt.title('k Parity plot')
         plt.ylabel('Predicted k')
         plt.xlabel('Real k')
+        plt.show()
+        
+        
+    def real_and_predictions_df(self, include_train_set = True):
+        temp_df = pd.DataFrame()
+
+        if True:
+            training = pd.concat([self.train_samples, self.y_train], axis=1)
+            training_preds = np.array(self.predict(self.X_train))
+
+            training['pred_curve_x0'] = np.array(training_preds)[:,1]
+            training['pred_curve_k'] = np.array(training_preds)[:,2]
+            temp_df = pd.concat([temp_df, training])
+
+
+        testing = pd.concat([self.test_samples, self.y_test], axis=1)
+        testing_preds = np.array(self.predict(self.X_test))
+
+        testing['pred_curve_x0'] = np.array(testing_preds)[:,1]
+        testing['pred_curve_k'] = np.array(testing_preds)[:,2]
+        temp_df = pd.concat([temp_df, testing])
+
+        temp_df['set'] = ['train'] * True * len(self.train_samples) + ['test'] * len(self.test_samples)
+
+        return temp_df
+        
