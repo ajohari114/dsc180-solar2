@@ -301,9 +301,6 @@ def generate_csv(fp, b_id):
 def get_curve_params(x,y):
     def logistic(x, L=1, x_0=0, k=1):
         return L / (1 + np.exp(-k * (x - x_0)))
-    
-    y = y - np.min(y)
-
     L_estimate = 0.6
     x_0_estimate = 200
     k_estimate = .03
@@ -343,7 +340,7 @@ def add_cmet_data(fp, b_id):
     for i in tqdm(cmet.columns[1:]):
         if i == 'Hour':
             continue
-        cmet[i] = (cmet[i] - np.min(cmet[i]))/(.60-np.min(cmet[i]))
+        cmet[i] = (cmet[i] - np.min(cmet[i]))
         curve_params, og_L = get_curve_params(cmet['Hour'], cmet[i])
         curve_params = [float(i) for i in curve_params]
 
