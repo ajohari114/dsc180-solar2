@@ -11,6 +11,8 @@ from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from py2neo import Graph, Node
+from scipy.ndimage import gaussian_filter
+
 
 website = 'fenninggroupnas.ucsd.edu'
 port = 7687
@@ -300,18 +302,32 @@ def get_curve_params(x,y):
     def logistic(x, L=1, x_0=0, k=1):
         return L / (1 + np.exp(-k * (x - x_0)))
 
-    L_estimate = 1
-    x_0_estimate = 100
+    L_estimate = 0.6
+    x_0_estimate = 200
     k_estimate = .03
     p_0 = [L_estimate, x_0_estimate, k_estimate]
-    popt, _ = curve_fit(logistic, x, y, p_0, bounds = ([.99, -np.inf, -np.inf],[1.0, np.inf, np.inf]))
-    return popt
+    
+    smoothed = gaussian_filter(y, sigma = 1000)
+    popt, _ = curve_fit(logistic, x, smoothed, p_0, bounds = ([0, -np.inf, -np.inf],[1, np.inf, np.inf]))
+    
+    original_L = p_0[0]
+    
+    pred_cmet = logistic(range(800), *popt)
+    pred_cmet = (pred_cmet-np.min(pred_cmet))/(popt[0]-np.min(pred_cmet))
+    
+    p_0[2] = popt[2]
+    p_0[1] = popt[1]
+    p_0[0] = 1
+    
+    popt, _ = curve_fit(logistic, range(800), pred_cmet, p_0, bounds = ([.99, popt[1]-1, 0],[1, popt[1], popt[2]]))
+    
+    return popt, original_L
 
-def create_cmet_node(batch_id, sample_id, cmet, curve_L, curve_x0, curve_k):
+def create_cmet_node(batch_id, sample_id, cmet, og_L, curve_L, curve_x0, curve_k):
     graph.run(f"""MATCH (n)
                   WHERE n.action = 'colormetrics' and n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}'
                   DELETE n""")
-    new_node = Node('Action', action = 'colormetrics', batch_id = batch_id, sample_id = sample_id, colormetrics_hours = [i[0] for i in cmet], normalized_colormetrics = [i[1] for i in cmet], curve_L = curve_L, curve_x0= curve_x0, curve_k = curve_k)
+    new_node = Node('Action', action = 'colormetrics', batch_id = batch_id, sample_id = sample_id, colormetrics_hours = [i[0] for i in cmet], normalized_colormetrics = [i[1] for i in cmet], curve_L = curve_L, curve_x0= curve_x0, curve_k = curve_k, original_L = og_L)
     
     graph.create(new_node)
     
@@ -325,9 +341,9 @@ def add_cmet_data(fp, b_id):
         if i == 'Hour':
             continue
         cmet[i] = (cmet[i] - np.min(cmet[i]))/(.60-np.min(cmet[i]))
-        curve_params = get_curve_params(cmet['Hour'], cmet[i])
+        curve_params, og_L = get_curve_params(cmet['Hour'], cmet[i])
         curve_params = [float(i) for i in curve_params]
 
         curr_cmet = cmet[['Hour', i]].values.tolist()
         curr_cmet = [[float(j) for j in i] for i in curr_cmet]
-        create_cmet_node(b_id, i, curr_cmet, *curve_params)
+        create_cmet_node(b_id, i, curr_cmet, og_L, *curve_params)
