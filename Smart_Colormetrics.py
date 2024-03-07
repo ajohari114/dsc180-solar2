@@ -301,6 +301,8 @@ def generate_csv(fp, b_id):
 def get_curve_params(x,y):
     def logistic(x, L=1, x_0=0, k=1):
         return L / (1 + np.exp(-k * (x - x_0)))
+    
+    y = y - np.min(y)
 
     L_estimate = 0.6
     x_0_estimate = 200
@@ -308,20 +310,21 @@ def get_curve_params(x,y):
     p_0 = [L_estimate, x_0_estimate, k_estimate]
     
     smoothed = gaussian_filter(y, sigma = 1000)
+
+
     popt, _ = curve_fit(logistic, x, smoothed, p_0, bounds = ([0, -np.inf, -np.inf],[1, np.inf, np.inf]))
-    
-    original_L = p_0[0]
-    
     pred_cmet = logistic(range(800), *popt)
     pred_cmet = (pred_cmet-np.min(pred_cmet))/(popt[0]-np.min(pred_cmet))
     
+    og_L = popt[0]
+        
     p_0[2] = popt[2]
     p_0[1] = popt[1]
     p_0[0] = 1
     
-    popt, _ = curve_fit(logistic, range(800), pred_cmet, p_0, bounds = ([.99, popt[1]-1, 0],[1, popt[1], popt[2]]))
+    popt, _ = curve_fit(logistic, range(800), pred_cmet, p_0, bounds = ([1, popt[1]-1, 0],[1.0001, popt[1], popt[2]]))
     
-    return popt, original_L
+    return popt, og_L
 
 def create_cmet_node(batch_id, sample_id, cmet, og_L, curve_L, curve_x0, curve_k):
     graph.run(f"""MATCH (n)
@@ -337,7 +340,7 @@ def add_cmet_data(fp, b_id):
     if 'Unnamed' in cmet.columns[0]:
         cmet = cmet.iloc[:,1:]
 
-    for i in cmet.columns[1:]:
+    for i in tqdm(cmet.columns[1:]):
         if i == 'Hour':
             continue
         cmet[i] = (cmet[i] - np.min(cmet[i]))/(.60-np.min(cmet[i]))
