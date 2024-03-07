@@ -324,7 +324,7 @@ def get_curve_params(x,y):
     
     popt, _ = curve_fit(logistic, range(800), pred_cmet, p_0, bounds = ([1, popt[1]-1, 0],[1.0001, popt[1], popt[2]]))
     
-    return popt, og_L
+    return popt, float(og_L)
 
 def create_cmet_node(batch_id, sample_id, cmet, og_L, curve_L, curve_x0, curve_k):
     graph.run(f"""MATCH (n)
