@@ -12,29 +12,34 @@ def grab_sample(batch_id, sample_id):
     g = graph.run(f"""MATCH (n:Chemical)
     WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
     WITH n.chemical_id AS chemical_id, collect(n) AS nodes
-    RETURN nodes[0] as unique_node
+    RETURN nodes[-1] as unique_node
     UNION
     MATCH (n:Action)
     WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
     WITH n.step_id AS step_id, collect(n) AS nodes
-    RETURN nodes[0] as unique_node""")
+    RETURN nodes[-1] as unique_node""")
     return g.to_data_frame()
     
 def grab_chemicals(batch_id, sample_id):
     g = graph.run(f"""MATCH (n:Chemical)
     WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
     WITH n.chemical_id AS chemical_id, collect(n) AS nodes
-    RETURN nodes[0] as unique_node""")
+    RETURN nodes[-1] as unique_node""")
     return g.to_data_frame()
 
 def grab_batch(batch_id):
     g = graph.run(f"""MATCH (n:Action)
     WHERE (n.step_id = '1' and n.batch_id = '{batch_id}')
     WITH n.sample_id AS sample_id, collect(n) AS nodes
-    WITH nodes[0] AS unique_node
+    WITH nodes[-1] AS unique_node
     RETURN unique_node.batch_id, unique_node.sample_id
     ORDER BY unique_node.batch_id, unique_node.sample_id""")
     
+    return g.to_ndarray()
+
+def get_batch_names():
+    g = graph.run(f"""MATCH (n)
+    RETURN DISTINCT n.batch_id""")
     return g.to_ndarray()
 
 def node_cluster_size(batch_id, sample_id):
@@ -45,7 +50,7 @@ def get_sample_steps(batch_id, sample_id):
     g = graph.run(f"""MATCH (n:Action)
     WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
     WITH n.step_id AS step_id, collect(n) AS nodes
-    with nodes[0]  as unique_node
+    with nodes[-1]  as unique_node
     RETURN unique_node.step_id
     ORDER BY unique_node.step_id""")
     return g.to_data_frame()
@@ -54,7 +59,7 @@ def all_samples():
     g = graph.run("""MATCH (n:Action)
     WHERE (n.step_id = 1)
     WITH n.batch_id AS batch_id, n.sample_id AS sample_id, collect(n) AS nodes
-    WITH nodes[0] AS unique_node
+    WITH nodes[-1] AS unique_node
     RETURN unique_node.batch_id, unique_node.sample_id
     ORDER BY unique_node.batch_id, unique_node.sample_id""")
 
@@ -72,7 +77,7 @@ def segment_samples(rules):
             q = f"""MATCH (n:Action)
             WHERE ({r})
             WITH n.sample_id AS sample_id, collect(n) AS nodes
-            WITH nodes[0] AS unique_node
+            WITH nodes[-1] AS unique_node
             RETURN unique_node.batch_id, unique_node.sample_id
             ORDER BY unique_node.batch_id, unique_node.sample_id"""
             nds.append(graph.run(q).to_ndarray())
@@ -81,7 +86,7 @@ def segment_samples(rules):
             q = f"""MATCH (c:Chemical)
             WHERE ({r})
             WITH c.sample_id AS sample_id, collect(c) AS nodes
-            WITH nodes[0] AS unique_node
+            WITH nodes[-1] AS unique_node
             RETURN unique_node.batch_id, unique_node.sample_id
             ORDER BY unique_node.batch_id, unique_node.sample_id"""
             nds.append(graph.run(q).to_ndarray())
@@ -120,9 +125,11 @@ def extract_dict(s):
     for i in range(len(idx_to_split)):
         if i == 0:
             split_elem.append(s[0:idx_to_split[0]])
+        elif idx_to_split[i] == -1:
+            split_elem.append(s[idx_to_split[i-1]+1:])
         else:
             split_elem.append(s[idx_to_split[i-1]+1:idx_to_split[i]])
-
+                    
     elem_dict = {}
 
     for i in split_elem:
@@ -144,14 +151,14 @@ def create_row(sample, include_fitted_metrics = True, fitted_metrics_only = Fals
     row['sample_id'] = sample[0]['sample_id']
     for i in sample:
         if 'chem_type' in i:
-            if i['chem_type'] == 'solute' and not fitted_metrics_only:
+            if i['chem_type'] == 'solute' and 'concentration' in i and not fitted_metrics_only:
                 if 'concentration' in i:
                     row[f"solute_{i['content']}"] = float(i['concentration'])
                 else:
                     row[f"solute_{solute_counter}"] = i['content']
                     solute_counter += 1
                     
-            if i['chem_type'] == 'solvent' and not fitted_metrics_only:
+            if i['chem_type'] == 'solvent' and not fitted_metrics_only and False:
                 elems = extract_dict(i['content'])
                 if '' in elems and len(elems['']) == len(i['content'])-1:
                     row[f'solvent_{solvent_counter}'] = i['content']
@@ -164,10 +171,6 @@ def create_row(sample, include_fitted_metrics = True, fitted_metrics_only = Fals
                 row[f"solution_{i['content']}_volume"] = float(i['volume']) 
 
         if 'action' in i:
-            if i['action'] == 'anneal' and not fitted_metrics_only:
-                row['anneal_duration'] = i['anneal_duration']
-                row['anneal_temperature'] = i['anneal_temperature']
-
             if i['action'] == 'fitted_metrics' and include_fitted_metrics:
                 for j in i:
                     if j not in ['action', 'batch_id', 'sample_id', 'step_id', 't_samplepresent_0']:
