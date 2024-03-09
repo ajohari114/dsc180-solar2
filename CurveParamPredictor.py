@@ -15,6 +15,8 @@ from catboost import Pool
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 import warnings 
+import seaborn as sns
+
 warnings.filterwarnings('ignore')
 
 
@@ -23,12 +25,17 @@ class CurveParamPredictor:
         self.folds = folds
         self.all_x0_models = {}
         self.all_k_models = {}
+        self.overall_best_model_x0 = False
+        self.overall_best_model_k = False
+        self.overall_best_rmse_x0 = np.inf
+        self.overall_best_rmse_k = np.inf
+
 
     
     def predict(self, sample):
         if 'curve_L' in sample.columns:
             sample = sample.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
-        elif 'sample_id' in sample.columns:
+        else:
             sample = sample.drop(['batch_id','sample_id'], axis = 1)
             
         if len(self.cat_features) > 0:
@@ -36,14 +43,10 @@ class CurveParamPredictor:
             
         sample[self.num_features] = self.num_imp.transform(sample[self.num_features])
         
-        if len(sample) == 1:
-            return [1, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
+        if type(self.overall_best_model_k) == type(False):
+            return [.60, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
         else:
-            tr = []
-            for i, r in sample.iterrows():    
-                tr.append([1, self.best_model_x0.predict(pd.DataFrame(r).T)[0],self.best_model_k.predict(pd.DataFrame(r).T)[0]])
-            return tr
-                
+            return [.60, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(sample)[0]]
     
     def train(self, df):
         self.samples_to_predict = df[df['curve_L'].isnull()]
@@ -52,9 +55,9 @@ class CurveParamPredictor:
         df = df[~df['curve_L'].isnull()]
         
         self.y = df[['curve_x0','curve_k']]
-        self.X = df.drop(['curve_L','curve_k','curve_x0'], axis = 1)
+        self.X = df.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
 
-        self.cat_features = self.X.select_dtypes(include=['object','bool']).drop(['batch_id','sample_id'], axis = 1).columns
+        self.cat_features = self.X.select_dtypes(include=['object','bool']).columns
         self.num_features = self.X.select_dtypes(exclude=['object','bool']).columns
         
         self.cat_imp = SimpleImputer(missing_values= np.nan, strategy= 'most_frequent')
@@ -79,10 +82,10 @@ class CurveParamPredictor:
             ],
         )
         regressors = {
-            'Ridge Regression': Ridge(),
-            'Lasso Regression': Lasso(max_iter=10000),
+            #'Ridge Regression': Ridge(),
+            #'Lasso Regression': Lasso(max_iter=10000),
             'ElasticNet': ElasticNet(max_iter=10000),
-            'Random Forest Regressor': RandomForestRegressor(),
+            #'Random Forest Regressor': RandomForestRegressor(),
             'SVR': SVR(),
             'CatBoost' : cb.CatBoost()
         }
@@ -129,16 +132,10 @@ class CurveParamPredictor:
             s += p * self.folds*2
         #print(f'{s} models in total will be trained\n-----')
         
-        best_rmse = np.inf
+        self.best_rmse_x0 = np.inf
+        self.best_rmse_k = np.inf
         
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=0.2)
-        
-        self.train_samples = self.X_train[['batch_id','sample_id']]
-        self.test_samples = self.X_test[['batch_id','sample_id']]
-        
-        self.X_train = self.X_train.drop(['batch_id','sample_id'], axis = 1)
-        self.X_test = self.X_test.drop(['batch_id','sample_id'], axis = 1)
-
 
         for name, regressor in regressors.items():
             #print(f'Training {name} x0 models')
@@ -146,6 +143,7 @@ class CurveParamPredictor:
                 ('preprocessor', preprocessor),
                 ('Regressor', regressor)
             ])
+
 
             grids = GridSearchCV(model,scoring= "neg_root_mean_squared_error", param_grid = hyperparameters[name], verbose = 0, cv = self.folds)
             
@@ -163,9 +161,9 @@ class CurveParamPredictor:
             
             self.all_x0_models[name] = rmse
 
-            if rmse < best_rmse:
+            if rmse < self.best_rmse_x0:
                 self.best_model_x0 = grids
-                best_rmse = rmse
+                self.best_rmse_x0 = rmse
             #print('-----')
         
             
@@ -195,9 +193,9 @@ class CurveParamPredictor:
             self.all_k_models[name] = rmse
 
 
-            if rmse < best_rmse:
+            if rmse < self.best_rmse_k:
                 self.best_model_k = grids
-                best_rmse = rmse
+                self.best_rmse_k = rmse
             #print('-----')
             
     def sample_performance_analysis(self, df):
@@ -247,6 +245,14 @@ class CurveParamPredictor:
                 temp_df = df.sample(i)
 
                 self.train(temp_df)
+                
+                if self.best_rmse_k > self.overall_best_rmse_k:
+                    self.overall_best_rmse_k = self.best_rmse_k
+                    self.overall_best_model_k = self.best_model_k
+                    
+                if self.best_rmse_x0 > self.overall_best_rmse_x0:
+                    self.overall_best_rmse_x0 = self.best_rmse_x0
+                    self.overall_best_model_x0 = self.best_model_x0
 
                 for k in self.all_k_models:
                     temp_stats_dict_k[k].append(self.all_k_models[k])
@@ -259,58 +265,60 @@ class CurveParamPredictor:
 
             for k in self.all_x0_models:
                 self.stats_dict_x0[k].append(temp_stats_dict_x0[k])
+        cols = {}
                 
-        for i in range(len(self.stats_dict_k['n'])):
-            for j in self.stats_dict_k:
-                if j == 'n':
-                    continue
-
-                temp = np.array(cpp.stats_dict_k[j][i])
-                temp_mean = np.mean(temp)
-                temp_std = np.std(temp)
-
-                print(f'{j} stats (before deleting outliers):')
-                print(f'RMSE average: {temp_mean}')
-                print(f'RMSE std: {temp_std}')
-                print(f'RMSE max: {np.max(temp)}')
-                print(f'RMSE min: {np.min(temp)}')
-
-
-                temp = temp[temp <= temp_mean + 3*temp_std]
-                temp = temp[temp >= temp_mean - 3*temp_std]
-
-                plt.hist(temp, bins  = 30)
-                plt.axvline(np.mean(temp), c = 'red', label = 'Average')
-                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {len(temp)})')
-                plt.ylabel('Frequency')
-                plt.xlabel('RMSE on Test Set')
-                plt.show()
-
-
         for i in range(len(self.stats_dict_x0['n'])):
-            for j in self.stats_dict_x0:
+            for j in self.stats_dict_k:
                 if j == 'n':
                     continue
 
                 temp = np.array(self.stats_dict_x0[j][i])
                 temp_mean = np.mean(temp)
                 temp_std = np.std(temp)
+                temp_med = np.median(temp)
+                cols[j] = temp
 
-                print(f'{j} stats (before deleting outliers):')
+                print(f'{j} stats when predicting x0:')
                 print(f'RMSE average: {temp_mean}')
                 print(f'RMSE std: {temp_std}')
+                print(f'RMSE median: {temp_med}')
                 print(f'RMSE max: {np.max(temp)}')
                 print(f'RMSE min: {np.min(temp)}')
+                
+            temp_df = pd.DataFrame(cols)
+            plt.figure(figsize=(10,6))
+            plt.yscale('log')
+            plt.ylabel('RMSE')
+            plt.title('Boxplot of models\' performance on test set when predicting x0')
+            sns.boxplot(temp_df, color = 'red')
+            plt.show()
 
-                temp = temp[temp <= temp_mean + 3*temp_std]
-                temp = temp[temp >= temp_mean - 3*temp_std]
 
-                plt.hist(temp, bins  = 20)
-                plt.axvline(np.mean(temp), c = 'red', label = 'Average')
-                plt.title(f'Distribution of test scores for {j} when predicting x0 (n = {len(temp)})')
-                plt.ylabel('Frequency')
-                plt.xlabel('RMSE on Test Set')
-                plt.show()
+        for i in range(len(self.stats_dict_k['n'])):
+            for j in self.stats_dict_k:
+                if j == 'n':
+                    continue
+
+                temp = np.array(self.stats_dict_k[j][i])
+                temp_mean = np.mean(temp)
+                temp_std = np.std(temp)
+                temp_med = np.median(temp)
+                cols[j] = temp
+
+                print(f'{j} stats when predicting k:')
+                print(f'RMSE average: {temp_mean}')
+                print(f'RMSE std: {temp_std}')
+                print(f'RMSE median: {temp_med}')
+                print(f'RMSE max: {np.max(temp)}')
+                print(f'RMSE min: {np.min(temp)}')
+                
+            temp_df = pd.DataFrame(cols)
+            plt.figure(figsize=(10,6))
+            plt.yscale('log')
+            plt.ylabel('RMSE')
+            plt.title('Boxplot of models\' performance on test set when predicting k')
+            sns.boxplot(temp_df, color = 'red')
+            plt.show()
                 
     def generate_parity_plots(self):
         observed_x0 = []
@@ -336,27 +344,17 @@ class CurveParamPredictor:
         plt.xlabel('Real k')
         plt.show()
         
+    def get_feature_importances(self):
         
-    def real_and_predictions_df(self, include_train_set = True):
-        temp_df = pd.DataFrame()
+        if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()) and type(self.best_model_k.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
+            return 'Neither best model is catboost.'
+        df_temp = pd.DataFrame()
 
-        if True:
-            training = pd.concat([self.train_samples, self.y_train], axis=1)
-            training_preds = np.array(self.predict(self.X_train))
-
-            training['pred_curve_x0'] = np.array(training_preds)[:,1]
-            training['pred_curve_k'] = np.array(training_preds)[:,2]
-            temp_df = pd.concat([temp_df, training])
-
-
-        testing = pd.concat([self.test_samples, self.y_test], axis=1)
-        testing_preds = np.array(self.predict(self.X_test))
-
-        testing['pred_curve_x0'] = np.array(testing_preds)[:,1]
-        testing['pred_curve_k'] = np.array(testing_preds)[:,2]
-        temp_df = pd.concat([temp_df, testing])
-
-        temp_df['set'] = ['train'] * True * len(self.train_samples) + ['test'] * len(self.test_samples)
-
-        return temp_df
+        df_temp['feature'] = cpp.best_model_x0.best_estimator_.named_steps['preprocessor'].get_feature_names_out()
+        if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
+            df_temp['importances_x0'] = cpp.best_model_x0.best_estimator_.named_steps["Regressor"].feature_importances_
+        if type(self.best_model_k.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
+            df_temp['importances_k'] = cpp.best_model_k.best_estimator_.named_steps["Regressor"].feature_importances_
+        df_temp.sort_values('importances_x0', ascending =False)
         
+        return df_temp
