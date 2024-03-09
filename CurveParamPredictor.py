@@ -44,9 +44,9 @@ class CurveParamPredictor:
         sample[self.num_features] = self.num_imp.transform(sample[self.num_features])
         
         if type(self.overall_best_model_k) == type(False):
-            return [.60, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
+            return [1, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
         else:
-            return [.60, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(sample)[0]]
+            return [1, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(sample)[0]]
     
     def train(self, df):
         self.samples_to_predict = df[df['curve_L'].isnull()]
