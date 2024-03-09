@@ -70,22 +70,26 @@ def segment_samples(rules):
     nds = []
     
     for r in rules:
-        if (r[:2] != 'n.' and r[:2] != 'c.'):
-            raise ValueError(f"The first two characters in a rule must be 'n.' or 'c.': {r} ")
-            
-        if r[0] == 'n':
+        if r[0] == '(':
+            if (r[:3] != '(n.' and r[:3] != '(c.'):
+                raise ValueError(f"The first two characters in a rule must be 'n.' or 'c.': {r} ")
+        else:
+            if (r[:2] != 'n.' and r[:2] != 'c.'):
+                raise ValueError(f"The first two characters in a rule must be 'n.' or 'c.': {r} ")
+
+        if r[0 + (r[0] == '(')] == 'n':
             q = f"""MATCH (n:Action)
             WHERE ({r})
-            WITH n.sample_id AS sample_id, collect(n) AS nodes
+            WITH n.batch_id as batch_id, n.sample_id AS sample_id, collect(n) AS nodes
             WITH nodes[-1] AS unique_node
             RETURN unique_node.batch_id, unique_node.sample_id
             ORDER BY unique_node.batch_id, unique_node.sample_id"""
             nds.append(graph.run(q).to_ndarray())
             
-        if r[0] == 'c':
+        if r[0 + (r[0] == '(')] == 'c':
             q = f"""MATCH (c:Chemical)
             WHERE ({r})
-            WITH c.sample_id AS sample_id, collect(c) AS nodes
+            WITH c.batch_id as batch_id, c.sample_id AS sample_id, collect(c) AS nodes
             WITH nodes[-1] AS unique_node
             RETURN unique_node.batch_id, unique_node.sample_id
             ORDER BY unique_node.batch_id, unique_node.sample_id"""
@@ -93,6 +97,8 @@ def segment_samples(rules):
             
     if len(rules) == 0:
         nds = set([tuple(i) for i in all_samples()])
+    elif len(rules) == 1:
+        return nds[0]
     else:  
         nds = [set([tuple(j) for j in i]) for i in nds]
         nds = set.intersection(*nds)
