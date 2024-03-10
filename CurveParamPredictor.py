@@ -205,7 +205,7 @@ class CurveParamPredictor:
         self.stats_dict_k = defaultdict(lambda :[])
 
         
-        for i in range(15, len(cpp.X), 5):
+        for i in range(15, len(self.X), 5):
             print(F'-----Analyzing models performance on {i} samples-----')
             self.stats_dict_k['n'].append(i)
             self.stats_dict_x0['n'].append(i)
@@ -350,11 +350,11 @@ class CurveParamPredictor:
             return 'Neither best model is catboost.'
         df_temp = pd.DataFrame()
 
-        df_temp['feature'] = cpp.best_model_x0.best_estimator_.named_steps['preprocessor'].get_feature_names_out()
+        df_temp['feature'] = self.best_model_x0.best_estimator_.named_steps['preprocessor'].get_feature_names_out()
         if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
-            df_temp['importances_x0'] = cpp.best_model_x0.best_estimator_.named_steps["Regressor"].feature_importances_
+            df_temp['importances_x0'] = self.best_model_x0.best_estimator_.named_steps["Regressor"].feature_importances_
         if type(self.best_model_k.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
-            df_temp['importances_k'] = cpp.best_model_k.best_estimator_.named_steps["Regressor"].feature_importances_
+            df_temp['importances_k'] = self.best_model_k.best_estimator_.named_steps["Regressor"].feature_importances_
         df_temp.sort_values('importances_x0', ascending =False)
         
         return df_temp
