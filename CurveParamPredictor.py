@@ -204,7 +204,7 @@ class CurveParamPredictor:
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
         
-        for i in np.arange(n*.2, n+1, n*10):
+        for i in tqdm(np.arange(n*.2, n+1, n*10), desc = 'Analyzing performance across sample sizes'):
             i = int(i)
             print(F'-----Analyzing models performance on {i} samples-----')
             
