@@ -351,10 +351,14 @@ class CurveParamPredictor:
         df_temp = pd.DataFrame()
 
         df_temp['feature'] = self.best_model_x0.best_estimator_.named_steps['preprocessor'].get_feature_names_out()
-        if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
+        if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) == type(cb.CatBoost()):
             df_temp['importances_x0'] = self.best_model_x0.best_estimator_.named_steps["Regressor"].feature_importances_
-        if type(self.best_model_k.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
+        if type(self.best_model_k.best_estimator_.named_steps['Regressor']) == type(cb.CatBoost()):
             df_temp['importances_k'] = self.best_model_k.best_estimator_.named_steps["Regressor"].feature_importances_
-        df_temp.sort_values('importances_x0', ascending =False)
+            
+        if 'importances_x0' in df_temp.columns:
+            df_temp = df_temp.sort_values('importances_x0', ascending =False)
+        else:
+            df_temp = df_temp.sort_values('importances_k', ascending =False)
         
         return df_temp
