@@ -172,7 +172,7 @@ def create_row(sample, include_fitted_metrics = True, fitted_metrics_only = Fals
                     row[f'solvent_{solvent_counter}_elem_dict'] = elems
                 solvent_counter += 1
 
-            if i['chem_type'] == 'solution' and not fitted_metrics_only:
+            if i['chem_type'] == 'solution' and not fitted_metrics_only and False:
                 row[f"solution_{i['content']}_molarity"] = float(i['molarity'])
                 row[f"solution_{i['content']}_volume"] = float(i['volume']) 
 
