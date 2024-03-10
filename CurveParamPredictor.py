@@ -203,10 +203,11 @@ class CurveParamPredictor:
         
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
-
         
-        for i in range(15, len(self.X), 5):
+        for i in np.arange(n*.2, n+1, n*10):
+            i = int(i)
             print(F'-----Analyzing models performance on {i} samples-----')
+            
             self.stats_dict_k['n'].append(i)
             self.stats_dict_x0['n'].append(i)
             temp_stats_dict_k = defaultdict(lambda: [])
