@@ -198,22 +198,20 @@ class CurveParamPredictor:
                 self.best_rmse_k = rmse
             #print('-----')
             
-    def sample_performance_analysis(self, df):
+    def sample_performance_analysis(self, df, trials = 10):
         n = len(df)
         
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
         
-        for i in tqdm(np.arange(n*.2, n+1, n*10), desc = 'Analyzing performance across sample sizes'):
-            i = int(i)
-            print(F'-----Analyzing models performance on {i} samples-----')
-            
+        for i in tqdm(np.arange(n*.2, n+1, n*.10), desc = 'Analyzing performance across sample sizes'):
+            i = int(i)            
             self.stats_dict_k['n'].append(i)
             self.stats_dict_x0['n'].append(i)
             temp_stats_dict_k = defaultdict(lambda: [])
             temp_stats_dict_x0 = defaultdict(lambda: [])
 
-            for _ in tqdm(range(10), desc = f'Running trials for {i} samples.'):
+            for _ in tqdm(range(trials), desc = f'Running trials for {i} samples.'):
                 temp_df = df.sample(i)
 
                 self.train(temp_df)
@@ -225,12 +223,33 @@ class CurveParamPredictor:
                     temp_stats_dict_x0[k].append(self.all_x0_models[k])
                     
             for k in self.all_k_models:
-                self.stats_dict_k[k].append(temp_stats_dict_k[k])
+                self.stats_dict_k[k].append(temp_stats_dict_k[k][0])
 
             for k in self.all_x0_models:
-                print(k)
-                self.stats_dict_x0[k].append(temp_stats_dict_x0[k])
+                self.stats_dict_x0[k].append(temp_stats_dict_x0[k][0])
                 
+        k_stats = pd.DataFrame(self.stats_dict_k)
+        plt.figure(figsize=(10,6))
+        for i in k_stats.columns[1:]:
+            plt.plot(k_stats['n'], k_stats[i], label = i)
+        plt.xticks(k_stats['n'])
+        plt.xlabel('Sample Size')
+        plt.ylabel('RMSE on Test Set')
+        plt.title('Model Performance when Predicting k parameter')
+        plt.legend()
+        plt.show()
+        
+        x0_stats = pd.DataFrame(self.stats_dict_x0)
+        plt.figure(figsize=(10,6))
+        for i in k_stats.columns[1:]:
+            plt.plot(k_stats['n'], x0_stats[i], label = i)
+        plt.xticks(x0_stats['n'])
+        plt.xlabel('Sample Size')
+        plt.ylabel('RMSE on Test Set')
+        plt.title('Model Performance when Predicting x0 parameter')
+        plt.legend()
+        plt.show()
+
     def model_variance_analysis(self,df, samplings = 100):
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
