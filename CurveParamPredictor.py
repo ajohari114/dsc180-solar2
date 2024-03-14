@@ -6,10 +6,9 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.svm import SVR
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import r2_score
 from collections import defaultdict
 import catboost as cb
 from catboost import Pool
@@ -30,27 +29,32 @@ class CurveParamPredictor:
         self.overall_best_model_k = False
         self.overall_best_rmse_x0 = np.inf
         self.overall_best_rmse_k = np.inf
-        self.both_model = False
-        self.both_rmse = np.inf
 
-
-    
-    def predict(self, sample, both = False):
+    def predict_one(self, sample):
         if 'curve_L' in sample.columns:
-            sample = sample.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
-        else:
+            sample = sample.drop(['curve_L','curve_k','curve_x0'], axis = 1)
+            
+        if 'sample_id' in sample.columns:
             sample = sample.drop(['batch_id','sample_id'], axis = 1)
             
         if len(self.cat_features) > 0:
             sample[self.cat_features] = self.cat_imp.transform(sample[self.cat_features])
             
         sample[self.num_features] = self.num_imp.transform(sample[self.num_features])
-        if both == False:
-            if type(self.overall_best_model_k) == type(False):
-                return [1, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
-            else:
-                return [1, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(sample)[0]]
-        elif both == True: return self.both_model.predict(sample)
+        
+        if type(self.overall_best_model_k) == type(False):
+            return [1, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(self.best_model_x0.predict(sample))]
+        else:
+            return [1, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(self.overall_best_model_x0.predict(sample))]
+    
+    def predict(self, samples):
+        tr = []
+        
+        for i in samples.index:
+            tr.append(self.predict_one(samples.loc[[i]]))
+        return np.array(tr)
+        
+    
     def train(self, df):
         self.samples_to_predict = df[df['curve_L'].isnull()]
         self.samples_to_predict = self.samples_to_predict.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
@@ -119,7 +123,7 @@ class CurveParamPredictor:
         }
 
         hyperparameters['SVR'] = {
-            'Regressor__kernel' : ['linear', 'rbf', 'sigmoid'],
+            'Regressor__kernel' : ['linear', 'rbf', 'sigmoid', 'poly'],
             'Regressor__degree' : [2,3,4],
             'Regressor__C' : [1, 0.5, 0.1],
         }
@@ -173,7 +177,6 @@ class CurveParamPredictor:
         for name, regressor in regressors.items():
             #print(f'Training {name} k models')
             model = Pipeline([
-                ('preprocessor', preprocessor),
                 ('Regressor', regressor)
             ])
 
@@ -181,13 +184,13 @@ class CurveParamPredictor:
             grids = GridSearchCV(model,scoring= "neg_root_mean_squared_error", param_grid = hyperparameters[name], verbose = 0, cv = self.folds)
             
             if name == 'CatBoost':
-                grids.fit(self.X_train, self.y_train['curve_k'], Regressor__verbose = 0)
+                grids.fit(self.y_train[['curve_x0']], self.y_train['curve_k'], Regressor__verbose = 0)
             else:
-                grids.fit(self.X_train, self.y_train['curve_k'])
+                grids.fit(self.y_train[['curve_x0']], self.y_train['curve_k'])
 
 
             # Make predictions on the test set
-            y_pred = grids.predict(self.X_test)
+            y_pred = grids.predict(self.y_test[['curve_x0']])
 
             # Evaluate the model
             rmse = np.sqrt(mean_squared_error(self.y_test['curve_k'], y_pred))
@@ -288,6 +291,8 @@ class CurveParamPredictor:
     def model_variance_analysis(self,df, samplings = 100):
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
+        self.r2_x0 = []
+        self.r2_k = []
         
         for i in [len(df)]:
             print(F'-----Analyzing models variance on {i} samples-----')
@@ -300,6 +305,9 @@ class CurveParamPredictor:
                 temp_df = df.sample(i)
 
                 self.train(temp_df)
+                
+                self.r2_x0.append(r2_score(self.y_test[['curve_x0']], self.best_model_x0.predict(self.X_test)))
+                self.r2_k.append(r2_score(self.y_test[['curve_k']], self.best_model_k.predict(self.y_test[['curve_x0']])))
                 
                 if self.best_rmse_k > self.overall_best_rmse_k:
                     self.overall_best_rmse_k = self.best_rmse_k
@@ -339,14 +347,17 @@ class CurveParamPredictor:
                 print(f'RMSE median: {temp_med}')
                 print(f'RMSE max: {np.max(temp)}')
                 print(f'RMSE min: {np.min(temp)}')
+                print('------')
                 
             temp_df = pd.DataFrame(cols)
+            plt.rc('axes', titlesize=20)
+            plt.rc('axes', labelsize=15)
             plt.figure(figsize=(10,6))
             plt.yscale('log')
             plt.ylabel('RMSE')
             plt.title('Boxplot of models\' performance on test set when predicting x0')
             sns.boxplot(temp_df, color = 'red')
-            plt.savefig('model variance analysis.png', dpi = 300)
+            plt.savefig('model variance analysis x0.png', dpi = 300)
             plt.show()
 
 
@@ -367,37 +378,72 @@ class CurveParamPredictor:
                 print(f'RMSE median: {temp_med}')
                 print(f'RMSE max: {np.max(temp)}')
                 print(f'RMSE min: {np.min(temp)}')
+                print('------')
                 
             temp_df = pd.DataFrame(cols)
+            plt.rc('axes', titlesize=20)
+            plt.rc('axes', labelsize=15)
             plt.figure(figsize=(10,6))
             plt.yscale('log')
             plt.ylabel('RMSE')
             plt.title('Boxplot of models\' performance on test set when predicting k')
             sns.boxplot(temp_df, color = 'red')
+            plt.savefig('model variance analysis k.png', dpi = 300)
             plt.show()
+        
+        
+        plt.rc('axes', titlesize=20)
+        plt.rc('axes', labelsize=15)
+        plt.figure(figsize=(10,6))
+        sns.kdeplot(self.r2_x0)
+        plt.xlabel('R2 Score')
+        plt.ylabel('Density')
+        plt.title('Distribution of R2 Scores for best x0 model')
+        plt.savefig('r2 distribution x0.png', dpi = 300)
+        plt.show()
+        
+        plt.rc('axes', titlesize=20)
+        plt.rc('axes', labelsize=15)
+        plt.figure(figsize=(10,6))
+        sns.kdeplot(self.r2_k)
+        plt.xlabel('R2 Score')
+        plt.ylabel('Density')
+        plt.title('Distribution of R2 Scores for best k model')
+        plt.savefig('r2 distribution j.png', dpi = 300)
+        plt.show()
                 
     def generate_parity_plots(self):
         observed_x0 = []
         observed_k = []
 
         predicted_x0 = self.best_model_x0.predict(self.X_test)
-        predicted_k = self.best_model_k.predict(self.X_test)
+        predicted_k = self.best_model_k.predict(self.y_test[['curve_x0']])
 
         obs = [self.y_test['curve_x0'], self.y_test['curve_k']]
+        
+        rmse = np.round(np.sqrt(mean_squared_error(self.y_test['curve_x0'], self.best_model_x0.predict(self.X_test))),4)
+        r2 = np.round(r2_score(self.y_test[['curve_x0']], self.best_model_x0.predict(self.X_test)),4)
 
         plt.rc('axes', titlesize=20)
         plt.rc('axes', labelsize=15)
+        plt.figure(figsize=(10,6))
         plt.scatter(obs[0], predicted_x0)
         plt.plot(obs[0], obs[0], c = 'red')
-        plt.title('x0 Parity plot')
+        plt.title(f'x0 Parity plot (RMSE: {rmse}, R2: {r2})')
         plt.ylabel('Predicted x0')
         plt.xlabel('Real x0')
         plt.savefig('x0 parity plot.png', dpi=300)
         plt.show()
         
+        rmse = np.round(np.sqrt(mean_squared_error(self.y_test['curve_k'], self.best_model_k.predict(self.y_test[['curve_x0']]))), 4)
+        r2 = np.round(r2_score(self.y_test[['curve_k']], self.best_model_k.predict(self.y_test[['curve_x0']])),4)
+        
+        plt.rc('axes', titlesize=20)
+        plt.rc('axes', labelsize=15)
+        plt.figure(figsize=(10,6))
         plt.scatter(obs[1], predicted_k)
         plt.plot(obs[1], obs[1], c = 'red')
-        plt.title('k Parity plot')
+        plt.title(f'k Parity plot (RMSE: {rmse}, R2: {r2})')
         plt.ylabel('Predicted k')
         plt.xlabel('Real k')
         plt.savefig('k parity plot.png', dpi=300)
@@ -405,19 +451,13 @@ class CurveParamPredictor:
         
     def get_feature_importances(self):
         
-        if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()) and type(self.best_model_k.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
-            return 'Neither best model is catboost.'
+        if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
+            return 'x0 best model is not catboost.'
         df_temp = pd.DataFrame()
 
         df_temp['feature'] = self.best_model_x0.best_estimator_.named_steps['preprocessor'].get_feature_names_out()
-        if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) == type(cb.CatBoost()):
-            df_temp['importances_x0'] = self.best_model_x0.best_estimator_.named_steps["Regressor"].feature_importances_
-        if type(self.best_model_k.best_estimator_.named_steps['Regressor']) == type(cb.CatBoost()):
-            df_temp['importances_k'] = self.best_model_k.best_estimator_.named_steps["Regressor"].feature_importances_
+        df_temp['importances_x0'] = self.best_model_x0.best_estimator_.named_steps["Regressor"].feature_importances_
             
-        if 'importances_x0' in df_temp.columns:
-            df_temp = df_temp.sort_values('importances_x0', ascending =False)
-        else:
-            df_temp = df_temp.sort_values('importances_k', ascending =False)
+        df_temp = df_temp.sort_values('importances_x0', ascending =False)
         
         return df_temp
