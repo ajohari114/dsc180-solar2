@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
+from sklearn.metrics import r2_score
 from collections import defaultdict
 import catboost as cb
 from catboost import Pool
@@ -29,10 +30,12 @@ class CurveParamPredictor:
         self.overall_best_model_k = False
         self.overall_best_rmse_x0 = np.inf
         self.overall_best_rmse_k = np.inf
+        self.both_model = False
+        self.both_rmse = np.inf
 
 
     
-    def predict(self, sample):
+    def predict(self, sample, both = False):
         if 'curve_L' in sample.columns:
             sample = sample.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
         else:
@@ -42,12 +45,12 @@ class CurveParamPredictor:
             sample[self.cat_features] = self.cat_imp.transform(sample[self.cat_features])
             
         sample[self.num_features] = self.num_imp.transform(sample[self.num_features])
-        
-        if type(self.overall_best_model_k) == type(False):
-            return [1, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
-        else:
-            return [1, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(sample)[0]]
-    
+        if both == False:
+            if type(self.overall_best_model_k) == type(False):
+                return [1, self.best_model_x0.predict(sample)[0], self.best_model_k.predict(sample)[0]]
+            else:
+                return [1, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(sample)[0]]
+        elif both == True: return self.both_model.predict(sample)
     def train(self, df):
         self.samples_to_predict = df[df['curve_L'].isnull()]
         self.samples_to_predict = self.samples_to_predict.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
@@ -204,8 +207,8 @@ class CurveParamPredictor:
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
         
-        for i in tqdm(np.arange(n*.2, n+1, n*.10), desc = 'Analyzing performance across sample sizes'):
-            i = int(i)            
+        for i in tqdm(np.arange(n*.20, n+1, n*.10), desc = 'Analyzing performance across sample sizes'):
+            i = int(i)
             self.stats_dict_k['n'].append(i)
             self.stats_dict_x0['n'].append(i)
             temp_stats_dict_k = defaultdict(lambda: [])
@@ -213,7 +216,6 @@ class CurveParamPredictor:
 
             for _ in tqdm(range(trials), desc = f'Running trials for {i} samples.'):
                 temp_df = df.sample(i)
-
                 self.train(temp_df)
 
                 for k in self.all_k_models:
@@ -223,33 +225,66 @@ class CurveParamPredictor:
                     temp_stats_dict_x0[k].append(self.all_x0_models[k])
                     
             for k in self.all_k_models:
-                self.stats_dict_k[k].append(temp_stats_dict_k[k][0])
+                self.stats_dict_k[k].append({
+                    'all_values':temp_stats_dict_k[k],
+                    'mean': np.mean(temp_stats_dict_k[k]),
+                    'std': np.std(temp_stats_dict_k[k])
+                })
 
             for k in self.all_x0_models:
-                self.stats_dict_x0[k].append(temp_stats_dict_x0[k][0])
-                
-        k_stats = pd.DataFrame(self.stats_dict_k)
-        plt.figure(figsize=(10,6))
-        for i in k_stats.columns[1:]:
-            plt.plot(k_stats['n'], k_stats[i], label = i)
-        plt.xticks(k_stats['n'])
-        plt.xlabel('Sample Size')
-        plt.ylabel('RMSE on Test Set')
-        plt.title('Model Performance when Predicting k parameter')
-        plt.legend()
-        plt.show()
-        
-        x0_stats = pd.DataFrame(self.stats_dict_x0)
-        plt.figure(figsize=(10,6))
-        for i in k_stats.columns[1:]:
-            plt.plot(k_stats['n'], x0_stats[i], label = i)
-        plt.xticks(x0_stats['n'])
-        plt.xlabel('Sample Size')
-        plt.ylabel('RMSE on Test Set')
-        plt.title('Model Performance when Predicting x0 parameter')
-        plt.legend()
-        plt.show()
+                self.stats_dict_x0[k].append({
+                    'all_values':temp_stats_dict_x0[k],
+                    'mean': np.mean(temp_stats_dict_x0[k]),
+                    'std': np.std(temp_stats_dict_x0[k])
+                })
 
+        # Plotting k parameter performance
+        plt.figure(figsize=(10, 6))
+        plt.rc('axes', titlesize=20)
+        plt.rc('axes', labelsize=15)
+
+        data_list = []
+        for model, model_data in self.stats_dict_k.items():
+            if model != 'n':
+                for i, sample_data in enumerate(model_data):
+                    n_value = self.stats_dict_k['n'][i]
+                    for val in sample_data['all_values']:
+                        data_list.append({'Model': model, 'n': n_value, 'Value': val})
+
+        df = pd.DataFrame(data_list)
+
+        # Plot using seaborn lineplot with 95% CI
+        plt.figure(figsize=(10, 6))
+        sns.lineplot(data=df, x='n', y='Value', hue='Model', ci=95, estimator=np.median)
+        plt.xlabel('Sample Size (n)')
+        plt.ylabel('RMSE on Test Set')
+        # plt.title('Sample performance in predicting k (Catboost)')
+        plt.legend(title='Model')
+        plt.tight_layout()
+        plt.savefig('k_sample_performance.png', dpi=300)
+        plt.show()
+        # Plotting x0 parameter performance
+        data_list = []
+        for model, model_data in self.stats_dict_x0.items():
+            if model != 'n':
+                for i, sample_data in enumerate(model_data):
+                    n_value = self.stats_dict_x0['n'][i]
+                    for val in sample_data['all_values']:
+                        data_list.append({'Model': model, 'n': n_value, 'Value': val})
+
+        df = pd.DataFrame(data_list)
+
+        # Plot using seaborn lineplot with 95% CI
+        plt.figure(figsize=(10, 6))
+        sns.lineplot(data=df, x='n', y='Value', hue='Model', ci=95, estimator=np.median)
+        plt.xlabel('Sample Size (n)')
+        plt.ylabel('RMSE on Test Set')
+        # plt.title('Sample performance in predicting x0 (Catboost)')
+        plt.legend(title='Model')
+        plt.tight_layout()
+        plt.savefig('x0_sample_performance.png', dpi=300)
+        plt.show()
+                
     def model_variance_analysis(self,df, samplings = 100):
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
@@ -311,6 +346,7 @@ class CurveParamPredictor:
             plt.ylabel('RMSE')
             plt.title('Boxplot of models\' performance on test set when predicting x0')
             sns.boxplot(temp_df, color = 'red')
+            plt.savefig('model variance analysis.png', dpi = 300)
             plt.show()
 
 
@@ -349,12 +385,14 @@ class CurveParamPredictor:
 
         obs = [self.y_test['curve_x0'], self.y_test['curve_k']]
 
-            
+        plt.rc('axes', titlesize=20)
+        plt.rc('axes', labelsize=15)
         plt.scatter(obs[0], predicted_x0)
         plt.plot(obs[0], obs[0], c = 'red')
         plt.title('x0 Parity plot')
         plt.ylabel('Predicted x0')
         plt.xlabel('Real x0')
+        plt.savefig('x0 parity plot.png', dpi=300)
         plt.show()
         
         plt.scatter(obs[1], predicted_k)
@@ -362,6 +400,7 @@ class CurveParamPredictor:
         plt.title('k Parity plot')
         plt.ylabel('Predicted k')
         plt.xlabel('Real k')
+        plt.savefig('k parity plot.png', dpi=300)
         plt.show()
         
     def get_feature_importances(self):
