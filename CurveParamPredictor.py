@@ -22,6 +22,13 @@ warnings.filterwarnings('ignore')
 
 class CurveParamPredictor: 
     def __init__(self, folds = 10):
+        """
+        Initializes the CurveParamPredictor class.
+
+        Parameters:
+            folds (int, optional): Number of folds for cross-validation. Defaults to 10.
+        """
+        
         self.folds = folds
         self.all_x0_models = {}
         self.all_k_models = {}
@@ -31,6 +38,16 @@ class CurveParamPredictor:
         self.overall_best_rmse_k = np.inf
 
     def predict_one(self, sample):
+        """
+        Predicts curve parameters for a single sample.
+
+        Parameters:
+            sample (pandas.DataFrame): DataFrame representing a single sample.
+
+        Returns:
+            list: Predicted curve parameters for the sample.
+        """
+        
         if 'curve_L' in sample.columns:
             sample = sample.drop(['curve_L','curve_k','curve_x0'], axis = 1)
             
@@ -48,6 +65,16 @@ class CurveParamPredictor:
             return [1, self.overall_best_model_x0.predict(sample)[0], self.overall_best_model_k.predict(self.overall_best_model_x0.predict(sample))]
     
     def predict(self, samples):
+        """
+        Predicts curve parameters for multiple samples.
+
+        Parameters:
+            samples (pandas.DataFrame): DataFrame representing multiple samples.
+
+        Returns:
+            numpy.ndarray: Predicted curve parameters for the samples.
+        """
+        
         tr = []
         
         for i in samples.index:
@@ -56,6 +83,16 @@ class CurveParamPredictor:
         
     
     def train(self, df):
+        """
+        Trains the model using the provided data.
+
+        Args:
+            df (pandas.DataFrame): DataFrame containing training data.
+            
+        Note:
+            Unlike .train() for sklearn regressors the given DataFrame should include both features and target variables. Train-test split and grid search are done within this function.
+        """
+        
         self.samples_to_predict = df[df['curve_L'].isnull()]
         self.samples_to_predict = self.samples_to_predict.drop(['batch_id','sample_id','curve_L','curve_k','curve_x0'], axis = 1)
         
@@ -205,6 +242,17 @@ class CurveParamPredictor:
             #print('-----')
             
     def sample_performance_analysis(self, df, trials = 10):
+        """
+        Analyzes the performance of the model across different sample sizes and generates graphs to show that performance.
+
+        Parameters:
+            df (DataFrame): The DataFrame containing training data.
+            trials (int): Number of trials to run for each sample size. Defaults to 10.
+            
+        Note:
+            Graphs are saved locally as PNGs.
+        """
+        
         n = len(df)
         
         self.stats_dict_x0 = defaultdict(lambda :[])
@@ -289,6 +337,17 @@ class CurveParamPredictor:
         plt.show()
                 
     def model_variance_analysis(self,df, samplings = 100):
+        """
+        Analyzes the variance of the models by repeatedly sampling the dataset and generates graphs to show that performance.
+
+        Parameters:
+            df (DataFrame): The DataFrame containing the training data.
+            samplings (int): Number of samplings to run for variance analysis. Defaults to 100.
+            
+        Note:
+            Graphs are saved locally as PNGs.        
+        """
+        
         self.stats_dict_x0 = defaultdict(lambda :[])
         self.stats_dict_k = defaultdict(lambda :[])
         self.r2_x0 = []
@@ -409,10 +468,17 @@ class CurveParamPredictor:
         plt.xlabel('R2 Score')
         plt.ylabel('Density')
         plt.title('Distribution of R2 Scores for best k model')
-        plt.savefig('r2 distribution j.png', dpi = 300)
+        plt.savefig('r2 distribution k.png', dpi = 300)
         plt.show()
                 
     def generate_parity_plots(self):
+        """
+        Generates parity plots to compare predicted values with observed values.
+        
+        Note:
+            Graphs are saved locally as PNGs.
+        """
+        
         observed_x0 = []
         observed_k = []
 
@@ -432,7 +498,7 @@ class CurveParamPredictor:
         plt.title(f'x0 Parity plot (RMSE: {rmse}, R2: {r2})')
         plt.ylabel('Predicted x0')
         plt.xlabel('Real x0')
-        plt.savefig('x0 parity plot.png', dpi=300)
+        plt.savefig('parity plot x0.png', dpi=300)
         plt.show()
         
         rmse = np.round(np.sqrt(mean_squared_error(self.y_test['curve_k'], self.best_model_k.predict(self.y_test[['curve_x0']]))), 4)
@@ -446,10 +512,16 @@ class CurveParamPredictor:
         plt.title(f'k Parity plot (RMSE: {rmse}, R2: {r2})')
         plt.ylabel('Predicted k')
         plt.xlabel('Real k')
-        plt.savefig('k parity plot.png', dpi=300)
+        plt.savefig('parity plot k.png', dpi=300)
         plt.show()
         
     def get_feature_importances(self):
+        """
+        Retrieves the feature importances from the best x0 model.
+        
+        Note:
+            This fuction only works if the best x0 model is a CatBoost model.
+        """
         
         if type(self.best_model_x0.best_estimator_.named_steps['Regressor']) != type(cb.CatBoost()):
             return 'x0 best model is not catboost.'
