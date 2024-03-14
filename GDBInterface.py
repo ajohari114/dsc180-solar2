@@ -9,6 +9,17 @@ port = 7687
 graph = Graph(f"bolt://{website}:{port}", auth=("neo4j", "magenta-traffic-powder-anatomy-basket-8461")) # magenta-etc is the passphrase
 
 def grab_sample(batch_id, sample_id):
+    """
+    Retrieve the latest unique nodes representing a given sample of a given batch.
+
+    Parameters:
+        batch_id (str): The identifier of the batch.
+        sample_id (str): The identifier of the sample within the batch.
+
+    Returns:
+        pandas.DataFrame: A DataFrame containing the latest unique nodes representing the sample.
+    """
+    
     g = graph.run(f"""MATCH (n:Chemical)
     WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
     WITH n.chemical_id AS chemical_id, collect(n) AS nodes
@@ -19,15 +30,18 @@ def grab_sample(batch_id, sample_id):
     WITH n.step_id AS step_id, collect(n) AS nodes
     RETURN nodes[-1] as unique_node""")
     return g.to_data_frame()
-    
-def grab_chemicals(batch_id, sample_id):
-    g = graph.run(f"""MATCH (n:Chemical)
-    WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
-    WITH n.chemical_id AS chemical_id, collect(n) AS nodes
-    RETURN nodes[-1] as unique_node""")
-    return g.to_data_frame()
 
 def grab_batch(batch_id):
+    """
+    Fetches all samples of a given batch.
+
+    Parameters:
+        batch_id (str): The ID of the batch.
+
+    Returns:
+        numpy.ndarray: Array containing pairs of batch IDs and sample IDs of the given batch.
+    """
+    
     g = graph.run(f"""MATCH (n:Action)
     WHERE (n.step_id = '1' and n.batch_id = '{batch_id}')
     WITH n.sample_id AS sample_id, collect(n) AS nodes
@@ -38,36 +52,53 @@ def grab_batch(batch_id):
     return g.to_ndarray()
 
 def get_batch_names():
+    """
+    Retrieves all batch IDs.
+
+    Returns:
+        numpy.ndarray: Array containing unique batch IDs.
+        
+    """
+    
     g = graph.run(f"""MATCH (n)
     RETURN DISTINCT n.batch_id""")
     return g.to_ndarray()
 
 def node_cluster_size(batch_id, sample_id):
-    return len(grab_sample(batch_id, sample_id))
+    """
+    Calculates the number of the nodes for a given batch ID and sample ID.
+
+    Parameters:
+        batch_id (str): The ID of the batch.
+        sample_id (str): The ID of the sample.
+
+    Returns:
+        int: The size of the node cluster.
+    """
     
-
-def get_sample_steps(batch_id, sample_id):
-    g = graph.run(f"""MATCH (n:Action)
-    WHERE (n.batch_id = '{batch_id}' and n.sample_id = '{sample_id}')
-    WITH n.step_id AS step_id, collect(n) AS nodes
-    with nodes[-1]  as unique_node
-    RETURN unique_node.step_id
-    ORDER BY unique_node.step_id""")
-    return g.to_data_frame()
-
-def all_samples():
-    g = graph.run("""MATCH (n:Action)
-    WHERE (n.step_id = 1)
-    WITH n.batch_id AS batch_id, n.sample_id AS sample_id, collect(n) AS nodes
-    WITH nodes[-1] AS unique_node
-    RETURN unique_node.batch_id, unique_node.sample_id
-    ORDER BY unique_node.batch_id, unique_node.sample_id""")
-
-    return g.to_ndarray()
-
+    return len(grab_sample(batch_id, sample_id))
 
 def segment_samples(rules):
+    """
+    Retrieves all samples that meet the passed conditions in the rules.
+
+    Parameters:
+        rules (list): A list of rules specifying conditions for segmenting samples.
+
+    Returns:
+        set: batch_id and sample_id pairs that meet the passed conditions.
+
+    Raises:
+        ValueError: If the passed ruleset does not contain any rules or if a rule format is invalid,
+                    or if the ruleset results in 0 samples.
+        Warning: If samples in a segment have different numbers of nodes, tabularizing the segment is not advised.
+
+    """
+    
     nds = []
+    if len(rules) == 0:
+        raise ValueError('Passed ruleset does not contain any rules.')
+        
     
     for r in rules:
         if r[0] == '(':
@@ -95,10 +126,8 @@ def segment_samples(rules):
             ORDER BY unique_node.batch_id, unique_node.sample_id"""
             nds.append(graph.run(q).to_ndarray())
             
-    if len(rules) == 0:
-        nds = set([tuple(i) for i in all_samples()])
-    elif len(rules) == 1:
-        return nds[0]
+    if len(rules) == 1:
+        return set(nds[0])
     else:  
         nds = [set([tuple(j) for j in i]) for i in nds]
         nds = set.intersection(*nds)
@@ -118,37 +147,24 @@ def segment_samples(rules):
         
     return nds
 
-def extract_dict(s):
-    idx_to_split = []
-    for i in range(len(s)):
-        if s[i] == '_' and str.isdigit(s[i-1]):
-            idx_to_split.append(i)
-    split_elem = []
-
-    idx_to_split.append(-1)
-    split_elem = []
-
-    for i in range(len(idx_to_split)):
-        if i == 0:
-            split_elem.append(s[0:idx_to_split[0]])
-        elif idx_to_split[i] == -1:
-            split_elem.append(s[idx_to_split[i-1]+1:])
-        else:
-            split_elem.append(s[idx_to_split[i-1]+1:idx_to_split[i]])
-                    
-    elem_dict = {}
-
-    for i in split_elem:
-        num_idx = 0
-        for j in range(len(i)):
-            if str.isdigit(i[j]):
-                num_idx= j
-                break
-        elem_dict[i[:num_idx]] = i[num_idx:]
-
-    return elem_dict
-
 def create_row(sample, include_fitted_metrics = True, fitted_metrics_only = False):
+    """
+    Creates a row of data from a dataframe representing the nodes of a given sample.
+
+    Parameters:
+        sample (pandas.DataFrame): DataFrame containing a sample's information.
+        include_fitted_metrics (bool, optional): Flag indicating whether to include fitted metrics. Defaults to True.
+        fitted_metrics_only (bool, optional): Flag indicating whether to include only fitted metrics. Defaults to False.
+
+    Returns:
+        dict: Row of data containing sample information.
+
+    Note:
+        This function creates a row of data from a unique node representing a sample in the graph database.
+        It extracts information such as batch ID, sample ID, solute concentrations, solvent details,
+        solution molarity and volume, fitted metrics, and color metrics, based on specified flags.
+    """
+    
     sample = sample['unique_node']
     row = {}
     solute_counter = 1
@@ -186,28 +202,28 @@ def create_row(sample, include_fitted_metrics = True, fitted_metrics_only = Fals
                 row['curve_x0'] = i['curve_x0']
                 row['curve_k'] = i['curve_k']
     return row
-def expand_df(df):
-    for i in range(len(df.columns)):
-        if 'elem_dict' in df.columns[i]:
-            elem_df = df[df.columns[i]].apply(pd.Series).fillna(0)
-            elem_df.columns = [f"{df.columns[i][:-10]}_{j}" for j in elem_df.columns]
-            num_elems = len(elem_df.columns)
-            df = pd.concat([df,elem_df], axis = 1)
-            col_index = df.columns.to_list().index(df.columns[i])
-            df = df.drop(df.columns[i], axis = 1)
-            col_list = df.columns.to_list()
-            new_col_order = col_list[:col_index] + col_list[-num_elems:] + col_list[col_index:-num_elems]
-            df = df.loc[:,new_col_order]
-    return df
     
 def tabularize_samples(samples, include_fitted_metrics = True, fitted_metrics_only = False):
+    """
+    Converts given samples into a tabular format.
+
+    Args:
+        samples (list): List of tuples containing batch ID and sample ID pairs.
+        include_fitted_metrics (bool, optional): Flag indicating whether to include fitted metrics. Defaults to True.
+        fitted_metrics_only (bool, optional): Flag indicating whether to include only fitted metrics. Defaults to False.
+
+    Returns:
+        pandas.DataFrame: DataFrame containing tabularized sample data.
+
+    Note:
+        Missing solute concentrations are replaced with 0.
+    """
+    
     rows = []
     for i in tqdm(samples, desc = 'Tabularizing Samples'):
         rows.append(create_row(grab_sample(*i),include_fitted_metrics, fitted_metrics_only))
 
     df = pd.DataFrame(rows)
-    for i in range(len(df.columns)):
-        df = expand_df(df)
     for i in range(len(df.columns)):
         if 'solute_' in df.columns[i] and not str.isdigit(df.columns[i][-1]):
             df[df.columns[i]] = df[df.columns[i]].fillna(0)
