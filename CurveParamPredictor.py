@@ -86,7 +86,7 @@ class CurveParamPredictor:
         """
         Trains the model using the provided data.
 
-        Args:
+        Parameters:
             df (pandas.DataFrame): DataFrame containing training data.
             
         Note:
