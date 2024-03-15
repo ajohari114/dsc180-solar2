@@ -1,8 +1,15 @@
 catboost==1.2.2
 matplotlib==3.5.1
 numpy==1.26.4
+opencv_python==4.8.1.78
+pactools==0.3.1
 pandas==1.4.1
+Pillow==9.0.1
+Pillow==10.2.0
 py2neo==2021.2.4
 scikit_learn==1.3.dev0
+scipy==1.12.0
 seaborn==0.13.2
+tifffile==2023.9.26
 tqdm==4.63.1
+xgboost==2.0.3
